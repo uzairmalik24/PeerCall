@@ -5,10 +5,82 @@ const ICE_SERVERS = [
   { urls: 'stun:stun1.l.google.com:19302' },
 ]
 
-// Encode: type prefix + raw SDP → deflate → base64
-// No JSON — avoids \r\n escaping doubling the size
+// Strip SDP down to opus + VP8 only. Removes ~80% of bloat safely.
+// Dynamically finds the correct payload types from the SDP itself.
+function minifySdp(sdp) {
+  const lines = sdp.split('\r\n')
+
+  // Pass 1: discover payload types
+  let opusPT = null
+  let vp8PT = null
+  let vp8RtxPT = null
+
+  for (const line of lines) {
+    const opus = line.match(/^a=rtpmap:(\d+) opus\//)
+    if (opus) opusPT = opus[1]
+    const vp8 = line.match(/^a=rtpmap:(\d+) VP8\//)
+    if (vp8) vp8PT = vp8[1]
+  }
+
+  // Find RTX paired with VP8
+  if (vp8PT) {
+    for (const line of lines) {
+      const m = line.match(/^a=fmtp:(\d+) apt=(\d+)$/)
+      if (m && m[2] === vp8PT) { vp8RtxPT = m[1]; break }
+    }
+  }
+
+  // Pass 2: filter lines
+  const out = []
+  let section = null // null | 'audio' | 'video'
+  let keepPTs = null
+
+  for (const line of lines) {
+    // Media section start — rewrite with only kept PTs
+    if (line.startsWith('m=audio ')) {
+      section = 'audio'
+      keepPTs = opusPT ? new Set([opusPT]) : null
+      if (opusPT) {
+        const pre = line.match(/^(m=audio \d+ \S+ )/)
+        out.push(pre ? pre[1] + opusPT : line)
+      } else {
+        out.push(line)
+      }
+      continue
+    }
+    if (line.startsWith('m=video ')) {
+      section = 'video'
+      const pts = [vp8PT, vp8RtxPT].filter(Boolean)
+      keepPTs = pts.length ? new Set(pts) : null
+      if (pts.length) {
+        const pre = line.match(/^(m=video \d+ \S+ )/)
+        out.push(pre ? pre[1] + pts.join(' ') : line)
+      } else {
+        out.push(line)
+      }
+      continue
+    }
+
+    // Inside a media section with codec filtering active
+    if (section && keepPTs) {
+      // Drop rtpmap / fmtp / rtcp-fb for payload types we don't keep
+      const ptLine = line.match(/^a=(?:rtpmap|fmtp|rtcp-fb):(\d+)[ /]/)
+      if (ptLine && !keepPTs.has(ptLine[1])) continue
+
+      // Drop tcp candidates (never connect in practice)
+      if (line.startsWith('a=candidate:') && line.includes(' tcp ')) continue
+    }
+
+    out.push(line)
+  }
+
+  return out.join('\r\n')
+}
+
+// Encode: minify SDP → prepend type char → deflate → base64
 async function encode(desc) {
-  const raw = (desc.type === 'offer' ? 'O' : 'A') + desc.sdp
+  const minified = minifySdp(desc.sdp)
+  const raw = (desc.type === 'offer' ? 'O' : 'A') + minified
   const blob = new Blob([raw])
   const cs = new CompressionStream('deflate')
   const compressed = blob.stream().pipeThrough(cs)
@@ -19,7 +91,7 @@ async function encode(desc) {
   return btoa(bin)
 }
 
-// Decode: base64 → inflate → type prefix + raw SDP
+// Decode: base64 → inflate → split type char + SDP
 async function decode(str) {
   const cleaned = str.trim().replace(/\s/g, '')
   const bin = atob(cleaned)
@@ -71,19 +143,13 @@ export default function useWebRTC() {
     pc.onconnectionstatechange = () => {
       const state = pc.connectionState
       setConnectionState(state)
-      if (state === 'connected') {
-        setError(null)
-      }
+      if (state === 'connected') setError(null)
     }
 
     pc.oniceconnectionstatechange = () => {
       const state = pc.iceConnectionState
-      if (state === 'failed') {
-        setError('Connection failed. Please try again.')
-      }
-      if (state === 'connected') {
-        setError(null)
-      }
+      if (state === 'failed') setError('Connection failed. Please try again.')
+      if (state === 'connected') setError(null)
     }
 
     return pc
@@ -121,7 +187,6 @@ export default function useWebRTC() {
 
       const offerDesc = await pc.createOffer()
       await pc.setLocalDescription(offerDesc)
-
       await waitForIceCandidates()
 
       const desc = pc.localDescription
@@ -151,7 +216,6 @@ export default function useWebRTC() {
 
       const answerDesc = await pc.createAnswer()
       await pc.setLocalDescription(answerDesc)
-
       await waitForIceCandidates()
 
       const desc = pc.localDescription
