@@ -203,14 +203,22 @@ export default function Call() {
                     <p>Copy and send this to the person you want to call.</p>
                   </div>
                   <div className="code-area">
-                    <textarea readOnly value={offer} rows={3} />
-                    <button
-                      className="btn btn-primary"
-                      onClick={() => copyToClipboard(offer)}
-                    >
-                      {copied ? <Check size={16} /> : <Copy size={16} />}
-                      {copied ? 'Copied!' : 'Copy Code'}
-                    </button>
+                    <textarea
+                      readOnly
+                      value={offer}
+                      rows={4}
+                      onClick={(e) => e.target.select()}
+                    />
+                    <div className="code-actions">
+                      <span className="code-len">{offer.length} chars</span>
+                      <button
+                        className="btn btn-primary"
+                        onClick={() => copyToClipboard(offer)}
+                      >
+                        {copied ? <Check size={16} /> : <Copy size={16} />}
+                        {copied ? 'Copied!' : 'Copy Code'}
+                      </button>
+                    </div>
                   </div>
 
                   <div className="panel-divider" />
@@ -247,14 +255,22 @@ export default function Call() {
                     <p>Copy this response and send it to the caller.</p>
                   </div>
                   <div className="code-area">
-                    <textarea readOnly value={answer} rows={3} />
-                    <button
-                      className="btn btn-primary"
-                      onClick={() => copyToClipboard(answer)}
-                    >
-                      {copied ? <Check size={16} /> : <Copy size={16} />}
-                      {copied ? 'Copied!' : 'Copy Response'}
-                    </button>
+                    <textarea
+                      readOnly
+                      value={answer}
+                      rows={4}
+                      onClick={(e) => e.target.select()}
+                    />
+                    <div className="code-actions">
+                      <span className="code-len">{answer.length} chars</span>
+                      <button
+                        className="btn btn-primary"
+                        onClick={() => copyToClipboard(answer)}
+                      >
+                        {copied ? <Check size={16} /> : <Copy size={16} />}
+                        {copied ? 'Copied!' : 'Copy Response'}
+                      </button>
+                    </div>
                   </div>
                   <div className="waiting-hint">
                     <Loader2 size={14} className="spin" />

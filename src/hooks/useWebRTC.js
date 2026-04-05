@@ -5,32 +5,34 @@ const ICE_SERVERS = [
   { urls: 'stun:stun1.l.google.com:19302' },
 ]
 
-// Compress with deflate then base64
-async function compress(obj) {
-  const json = JSON.stringify(obj)
-  const blob = new Blob([json])
+// Encode: type prefix + raw SDP → deflate → base64
+// No JSON — avoids \r\n escaping doubling the size
+async function encode(desc) {
+  const raw = (desc.type === 'offer' ? 'O' : 'A') + desc.sdp
+  const blob = new Blob([raw])
   const cs = new CompressionStream('deflate')
-  const stream = blob.stream().pipeThrough(cs)
-  const buf = await new Response(stream).arrayBuffer()
+  const compressed = blob.stream().pipeThrough(cs)
+  const buf = await new Response(compressed).arrayBuffer()
   const bytes = new Uint8Array(buf)
-  let binary = ''
-  for (let i = 0; i < bytes.length; i++) {
-    binary += String.fromCharCode(bytes[i])
-  }
-  return btoa(binary)
+  let bin = ''
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i])
+  return btoa(bin)
 }
 
-async function decompress(str) {
-  const binary = atob(str)
-  const bytes = new Uint8Array(binary.length)
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i)
-  }
+// Decode: base64 → inflate → type prefix + raw SDP
+async function decode(str) {
+  const cleaned = str.trim().replace(/\s/g, '')
+  const bin = atob(cleaned)
+  const bytes = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
   const blob = new Blob([bytes])
   const ds = new DecompressionStream('deflate')
-  const stream = blob.stream().pipeThrough(ds)
-  const text = await new Response(stream).text()
-  return JSON.parse(text)
+  const decompressed = blob.stream().pipeThrough(ds)
+  const text = await new Response(decompressed).text()
+  return {
+    type: text[0] === 'O' ? 'offer' : 'answer',
+    sdp: text.slice(1),
+  }
 }
 
 export default function useWebRTC() {
@@ -122,7 +124,8 @@ export default function useWebRTC() {
 
       await waitForIceCandidates()
 
-      const code = await compress(pc.localDescription)
+      const desc = pc.localDescription
+      const code = await encode({ type: desc.type, sdp: desc.sdp })
       setOffer(code)
       setGenerating(false)
       return code
@@ -143,15 +146,16 @@ export default function useWebRTC() {
 
       stream.getTracks().forEach((track) => pc.addTrack(track, stream))
 
-      const offerDesc = await decompress(offerCode)
-      await pc.setRemoteDescription(offerDesc)
+      const offerDesc = await decode(offerCode)
+      await pc.setRemoteDescription(new RTCSessionDescription(offerDesc))
 
       const answerDesc = await pc.createAnswer()
       await pc.setLocalDescription(answerDesc)
 
       await waitForIceCandidates()
 
-      const code = await compress(pc.localDescription)
+      const desc = pc.localDescription
+      const code = await encode({ type: desc.type, sdp: desc.sdp })
       setAnswer(code)
       setGenerating(false)
       return code
@@ -166,8 +170,8 @@ export default function useWebRTC() {
   const acceptAnswer = useCallback(async (answerCode) => {
     try {
       setError(null)
-      const answerDesc = await decompress(answerCode)
-      await pcRef.current.setRemoteDescription(answerDesc)
+      const answerDesc = await decode(answerCode)
+      await pcRef.current.setRemoteDescription(new RTCSessionDescription(answerDesc))
     } catch (err) {
       setError('Invalid answer code. Please check and try again.')
     }
