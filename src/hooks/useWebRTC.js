@@ -5,71 +5,9 @@ const ICE_SERVERS = [
   { urls: 'stun:stun1.l.google.com:19302' },
 ]
 
-// Strip SDP to keep only opus (audio) and VP8 (video) — removes ~80% of codec bloat
-function stripSdp(sdp) {
-  const lines = sdp.split('\r\n')
-  const result = []
-  let currentMedia = null
-  let keepPayloads = new Set()
-  let skipPayload = null
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]
-
-    if (line.startsWith('m=audio')) {
-      currentMedia = 'audio'
-      keepPayloads = new Set(['111']) // opus
-      result.push(line.replace(/(\d+\s+)[\d\s]+$/, (m, prefix) => prefix + '111'))
-      continue
-    }
-
-    if (line.startsWith('m=video')) {
-      currentMedia = 'video'
-      keepPayloads = new Set(['96', '97']) // VP8 + rtx
-      result.push(line.replace(/(\d+\s+)[\d\s]+$/, (m, prefix) => prefix + '96 97'))
-      continue
-    }
-
-    if (!currentMedia) {
-      result.push(line)
-      continue
-    }
-
-    // Skip codec lines for payloads we don't want
-    const rtpmapMatch = line.match(/^a=rtpmap:(\d+)\s/)
-    if (rtpmapMatch) {
-      if (!keepPayloads.has(rtpmapMatch[1])) {
-        skipPayload = rtpmapMatch[1]
-        continue
-      }
-      skipPayload = null
-    }
-
-    const fmtpMatch = line.match(/^a=fmtp:(\d+)\s/)
-    if (fmtpMatch && !keepPayloads.has(fmtpMatch[1])) continue
-
-    const rtcpFbMatch = line.match(/^a=rtcpfb:(\d+)\s/) || line.match(/^a=rtcp-fb:(\d+)\s/)
-    if (rtcpFbMatch && !keepPayloads.has(rtcpFbMatch[1])) continue
-
-    result.push(line)
-  }
-
-  return result.join('\r\n')
-}
-
-function restoreSdp(sdp) {
-  // Stripped SDP works fine — browser ignores missing codecs gracefully
-  return sdp
-}
-
 // Compress with deflate then base64
 async function compress(obj) {
-  // Strip SDP before compressing
-  const stripped = { ...obj }
-  if (stripped.sdp) {
-    stripped.sdp = stripSdp(stripped.sdp)
-  }
-  const json = JSON.stringify(stripped)
+  const json = JSON.stringify(obj)
   const blob = new Blob([json])
   const cs = new CompressionStream('deflate')
   const stream = blob.stream().pipeThrough(cs)
