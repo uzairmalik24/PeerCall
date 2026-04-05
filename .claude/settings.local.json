@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm create:*)",
+      "Bash(npm install:*)",
+      "Bash(rm -f package-lock.json)",
+      "Bash(npx create-vite@latest temp-proj --template react)",
+      "Bash(cp -r temp-proj/* temp-proj/.gitignore .)",
+      "Bash(rm -rf temp-proj)",
+      "Bash(npm run:*)"
+    ]
+  }
+}
