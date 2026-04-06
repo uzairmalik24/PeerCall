@@ -5,154 +5,7 @@ const ICE_SERVERS = [
   { urls: 'stun:stun1.l.google.com:19302' },
 ]
 
-// Extract only the essential fields from SDP (~200 bytes instead of ~5000)
-function extractEssentials(type, sdp) {
-  const lines = sdp.split('\r\n')
-  const data = { t: type === 'offer' ? 0 : 1, c: [] }
-
-  // Session level
-  const oLine = lines.find(l => l.startsWith('o='))
-  if (oLine) data.o = oLine.slice(2)
-
-  const bundleLine = lines.find(l => l.startsWith('a=group:BUNDLE'))
-  if (bundleLine) data.b = bundleLine.slice(14).trim()
-
-  // Parse media sections
-  const mediaSections = []
-  let current = null
-  for (const line of lines) {
-    if (line.startsWith('m=')) {
-      current = { m: line, lines: [] }
-      mediaSections.push(current)
-    } else if (current) {
-      current.lines.push(line)
-    }
-  }
-
-  data.ms = []
-  for (const sec of mediaSections) {
-    const s = {}
-    // media line: m=audio 55924 UDP/TLS/RTP/SAVPF 111
-    const mParts = sec.m.match(/^m=(\w+)\s+(\d+)\s+(\S+)\s+(.+)$/)
-    if (!mParts) continue
-    s.k = mParts[1] // kind: audio/video
-    s.p = parseInt(mParts[2]) // port
-    s.pr = mParts[3] // protocol
-    s.pt = mParts[4] // payload types
-
-    for (const line of sec.lines) {
-      if (line.startsWith('a=ice-ufrag:')) s.u = line.slice(12)
-      else if (line.startsWith('a=ice-pwd:')) s.pw = line.slice(10)
-      else if (line.startsWith('a=fingerprint:')) s.fp = line.slice(14)
-      else if (line.startsWith('a=setup:')) s.su = line.slice(8)
-      else if (line.startsWith('a=mid:')) s.mi = line.slice(6)
-      else if (line.startsWith('a=sendrecv')) s.d = 'sr'
-      else if (line.startsWith('a=sendonly')) s.d = 'so'
-      else if (line.startsWith('a=recvonly')) s.d = 'ro'
-      else if (line.startsWith('a=inactive')) s.d = 'in'
-      else if (line.startsWith('a=rtpmap:')) {
-        if (!s.rm) s.rm = []
-        s.rm.push(line.slice(9))
-      }
-      else if (line.startsWith('a=fmtp:')) {
-        if (!s.fm) s.fm = []
-        s.fm.push(line.slice(7))
-      }
-      else if (line.startsWith('a=rtcp-fb:')) {
-        if (!s.fb) s.fb = []
-        s.fb.push(line.slice(10))
-      }
-      else if (line.startsWith('a=extmap:')) {
-        if (!s.em) s.em = []
-        s.em.push(line.slice(9))
-      }
-      else if (line.startsWith('a=ssrc-group:')) {
-        if (!s.sg) s.sg = []
-        s.sg.push(line.slice(13))
-      }
-      else if (line.startsWith('a=ssrc:')) {
-        if (!s.ss) s.ss = []
-        s.ss.push(line.slice(7))
-      }
-      else if (line.startsWith('a=msid-semantic:')) s.ms = line.slice(16)
-      else if (line.startsWith('a=msid:')) s.id = line.slice(7)
-      else if (line.startsWith('a=rtcp-mux')) s.mx = 1
-      else if (line.startsWith('a=rtcp-rsize')) s.rs = 1
-      else if (line.startsWith('a=candidate:')) {
-        // Only keep udp candidates
-        if (line.includes(' udp ') || line.includes(' UDP ')) {
-          if (!data.c) data.c = []
-          data.c.push(line.slice(12))
-        }
-      }
-    }
-    data.ms.push(s)
-  }
-
-  // msid-semantic from session level
-  const msidSem = lines.find(l => l.startsWith('a=msid-semantic:'))
-  if (msidSem) data.se = msidSem.slice(16).trim()
-
-  // extmap-allow-mixed
-  if (lines.some(l => l === 'a=extmap-allow-mixed')) data.ea = 1
-
-  return data
-}
-
-// Rebuild full SDP from essential fields
-function rebuildSdp(data) {
-  const lines = []
-  lines.push('v=0')
-  lines.push('o=' + (data.o || '- 0 0 IN IP4 127.0.0.1'))
-  lines.push('s=-')
-  lines.push('t=0 0')
-  if (data.b) lines.push('a=group:BUNDLE ' + data.b)
-  if (data.ea) lines.push('a=extmap-allow-mixed')
-  if (data.se) lines.push('a=msid-semantic: ' + data.se)
-
-  for (const s of (data.ms || [])) {
-    lines.push('m=' + s.k + ' ' + s.p + ' ' + s.pr + ' ' + s.pt)
-    // Pick IP from first candidate or use 0.0.0.0
-    let ip = '0.0.0.0'
-    if (data.c && data.c.length) {
-      const parts = data.c[0].split(' ')
-      ip = parts[4] || '0.0.0.0'
-    }
-    lines.push('c=IN IP4 ' + ip)
-    lines.push('a=rtcp:9 IN IP4 0.0.0.0')
-
-    // ICE candidates for this media section
-    if (data.c) {
-      for (const c of data.c) lines.push('a=candidate:' + c)
-    }
-
-    if (s.u) lines.push('a=ice-ufrag:' + s.u)
-    if (s.pw) lines.push('a=ice-pwd:' + s.pw)
-    lines.push('a=ice-options:trickle')
-    if (s.fp) lines.push('a=fingerprint:' + s.fp)
-    if (s.su) lines.push('a=setup:' + s.su)
-    if (s.mi !== undefined) lines.push('a=mid:' + s.mi)
-
-    if (s.em) for (const e of s.em) lines.push('a=extmap:' + e)
-
-    const dir = { sr: 'sendrecv', so: 'sendonly', ro: 'recvonly', in: 'inactive' }
-    lines.push('a=' + (dir[s.d] || 'sendrecv'))
-    if (s.id) lines.push('a=msid:' + s.id)
-    if (s.mx) lines.push('a=rtcp-mux')
-    if (s.rs) lines.push('a=rtcp-rsize')
-
-    if (s.rm) for (const r of s.rm) lines.push('a=rtpmap:' + r)
-    if (s.fb) for (const f of s.fb) lines.push('a=rtcp-fb:' + f)
-    if (s.fm) for (const f of s.fm) lines.push('a=fmtp:' + f)
-    if (s.sg) for (const g of s.sg) lines.push('a=ssrc-group:' + g)
-    if (s.ss) for (const ss of s.ss) lines.push('a=ssrc:' + ss)
-  }
-
-  lines.push('')
-  return lines.join('\r\n')
-}
-
-// Strip SDP to opus + VP8 only before extracting essentials
+// Strip SDP to opus + VP8 only — safe because we dynamically find the PTs
 function minifySdp(sdp) {
   const lines = sdp.split('\r\n')
   let opusPT = null, vp8PT = null, vp8RtxPT = null
@@ -203,12 +56,11 @@ function minifySdp(sdp) {
   return out.join('\r\n')
 }
 
-// Encode: SDP → minify → extract essentials → deflate → base64
+// Encode: minify SDP → type prefix + raw SDP → deflate → base64
 async function encode(desc) {
   const minified = minifySdp(desc.sdp)
-  const essentials = extractEssentials(desc.type, minified)
-  const json = JSON.stringify(essentials)
-  const blob = new Blob([json])
+  const raw = (desc.type === 'offer' ? 'O' : 'A') + minified
+  const blob = new Blob([raw])
   const cs = new CompressionStream('deflate')
   const compressed = blob.stream().pipeThrough(cs)
   const buf = await new Response(compressed).arrayBuffer()
@@ -218,20 +70,38 @@ async function encode(desc) {
   return btoa(bin)
 }
 
-// Decode: base64 → inflate → rebuild SDP
+// Decode: base64 → inflate → type prefix + raw SDP
 async function decode(str) {
-  const cleaned = str.trim().replace(/\s/g, '')
-  const bin = atob(cleaned)
+  // Clean whitespace, newlines, and invisible chars that messaging apps add
+  const cleaned = str.trim().replace(/[\s\r\n\t\u200B\u200C\u200D\uFEFF]/g, '')
+
+  let bin
+  try {
+    bin = atob(cleaned)
+  } catch {
+    throw new Error('DECODE_FAILED')
+  }
+
   const bytes = new Uint8Array(bin.length)
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
   const blob = new Blob([bytes])
   const ds = new DecompressionStream('deflate')
   const decompressed = blob.stream().pipeThrough(ds)
-  const text = await new Response(decompressed).text()
-  const data = JSON.parse(text)
+
+  let text
+  try {
+    text = await new Response(decompressed).text()
+  } catch {
+    throw new Error('DECOMPRESS_FAILED')
+  }
+
+  if (text[0] !== 'O' && text[0] !== 'A') {
+    throw new Error('INVALID_FORMAT')
+  }
+
   return {
-    type: data.t === 0 ? 'offer' : 'answer',
-    sdp: rebuildSdp(data),
+    type: text[0] === 'O' ? 'offer' : 'answer',
+    sdp: text.slice(1),
   }
 }
 
@@ -274,7 +144,7 @@ export default function useWebRTC() {
 
     pc.oniceconnectionstatechange = () => {
       const state = pc.iceConnectionState
-      if (state === 'failed') setError('Connection failed. Please try again.')
+      if (state === 'failed') setError('Connection failed. Both users may be behind strict firewalls that block direct connections.')
       if (state === 'connected') setError(null)
     }
 
@@ -291,7 +161,7 @@ export default function useWebRTC() {
       setLocalStream(stream)
       return stream
     } catch (err) {
-      setError('Could not access camera/microphone. Please allow permissions.')
+      setError('Could not access camera/microphone. Please allow permissions in your browser settings.')
       throw err
     }
   }, [])
@@ -299,7 +169,6 @@ export default function useWebRTC() {
   const waitForIceCandidates = () =>
     new Promise((resolve) => {
       resolveIceRef.current = resolve
-      // Don't wait forever for STUN — 3s is enough to get host + srflx candidates
       setTimeout(resolve, 3000)
     })
 
@@ -347,7 +216,15 @@ export default function useWebRTC() {
     } catch (err) {
       setConnectionState('idle')
       setGenerating(false)
-      setError('Invalid offer code. Please check and try again.')
+      if (err.message === 'DECODE_FAILED') {
+        setError('Could not read this code. Make sure you copied the entire code without any missing characters.')
+      } else if (err.message === 'DECOMPRESS_FAILED') {
+        setError('Code is corrupted. The code may have been truncated or modified during copy-paste. Try copying it again.')
+      } else if (err.message === 'INVALID_FORMAT') {
+        setError('This doesn\'t look like a valid PeerCall code. Make sure you\'re pasting the correct code.')
+      } else {
+        setError('Could not process the code. Make sure you copied the complete code from the other person.')
+      }
       throw err
     }
   }, [startMedia, createPeerConnection])
@@ -358,7 +235,15 @@ export default function useWebRTC() {
       const answerDesc = await decode(answerCode)
       await pcRef.current.setRemoteDescription(new RTCSessionDescription(answerDesc))
     } catch (err) {
-      setError('Invalid answer code. Please check and try again.')
+      if (err.message === 'DECODE_FAILED') {
+        setError('Could not read this response code. Make sure you copied the entire code without any missing characters.')
+      } else if (err.message === 'DECOMPRESS_FAILED') {
+        setError('Response code is corrupted. It may have been truncated during copy-paste. Ask the other person to copy it again.')
+      } else if (err.message === 'INVALID_FORMAT') {
+        setError('This doesn\'t look like a valid response code. Make sure you\'re pasting the response, not the original offer code.')
+      } else {
+        setError('Could not process the response code. Make sure the other person copied the complete response code.')
+      }
     }
   }, [])
 

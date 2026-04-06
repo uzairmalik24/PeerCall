@@ -447,6 +447,13 @@
   width: 100%;
 }
 
+.panel-tip {
+  margin-top: 14px;
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
 .waiting-hint {
   display: flex;
   align-items: center;

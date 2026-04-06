@@ -5,9 +5,8 @@ const ICE_SERVERS = [
   { urls: 'stun:stun1.l.google.com:19302' },
 ]
 
-const CHUNK_SIZE = 64 * 1024 // 64KB chunks
+const CHUNK_SIZE = 64 * 1024
 
-// Data-channel SDP is tiny — no media codecs. Just deflate + base64.
 async function encode(desc) {
   const raw = (desc.type === 'offer' ? 'O' : 'A') + desc.sdp
   const blob = new Blob([raw])
@@ -21,18 +20,49 @@ async function encode(desc) {
 }
 
 async function decode(str) {
-  const cleaned = str.trim().replace(/\s/g, '')
-  const bin = atob(cleaned)
+  const cleaned = str.trim().replace(/[\s\r\n\t\u200B\u200C\u200D\uFEFF]/g, '')
+
+  let bin
+  try {
+    bin = atob(cleaned)
+  } catch {
+    throw new Error('DECODE_FAILED')
+  }
+
   const bytes = new Uint8Array(bin.length)
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
   const blob = new Blob([bytes])
   const ds = new DecompressionStream('deflate')
   const decompressed = blob.stream().pipeThrough(ds)
-  const text = await new Response(decompressed).text()
+
+  let text
+  try {
+    text = await new Response(decompressed).text()
+  } catch {
+    throw new Error('DECOMPRESS_FAILED')
+  }
+
+  if (text[0] !== 'O' && text[0] !== 'A') {
+    throw new Error('INVALID_FORMAT')
+  }
+
   return {
     type: text[0] === 'O' ? 'offer' : 'answer',
     sdp: text.slice(1),
   }
+}
+
+function getDecodeError(err, context) {
+  if (err.message === 'DECODE_FAILED') {
+    return `Could not read this ${context}. Make sure you copied the entire code without any missing characters.`
+  }
+  if (err.message === 'DECOMPRESS_FAILED') {
+    return `${context.charAt(0).toUpperCase() + context.slice(1)} is corrupted. It may have been truncated during copy-paste. Try copying it again.`
+  }
+  if (err.message === 'INVALID_FORMAT') {
+    return `This doesn't look like a valid PeerCall ${context}. Make sure you're pasting the correct code.`
+  }
+  return `Could not process the ${context}. Make sure the complete code was copied.`
 }
 
 export default function useFileTransfer() {
@@ -46,11 +76,9 @@ export default function useFileTransfer() {
   const [error, setError] = useState(null)
   const [generating, setGenerating] = useState(false)
 
-  // Transfer state
-  const [sending, setSending] = useState(null) // { name, size, sent }
-  const [receiving, setReceiving] = useState(null) // { name, size, received }
-  const [receivedFiles, setReceivedFiles] = useState([]) // [{ name, size, url, type }]
-  const [sendQueue, setSendQueue] = useState([]) // files waiting
+  const [sending, setSending] = useState(null)
+  const [receiving, setReceiving] = useState(null)
+  const [receivedFiles, setReceivedFiles] = useState([])
   const [channelOpen, setChannelOpen] = useState(false)
 
   const receiveBufferRef = useRef([])
@@ -71,7 +99,6 @@ export default function useFileTransfer() {
 
     dc.onmessage = (e) => {
       if (typeof e.data === 'string') {
-        // Metadata message
         const meta = JSON.parse(e.data)
         if (meta.type === 'file-start') {
           receiveMetaRef.current = { name: meta.name, size: meta.size, mimeType: meta.mimeType }
@@ -92,7 +119,6 @@ export default function useFileTransfer() {
           receiveMetaRef.current = null
         }
       } else {
-        // Binary chunk
         receiveBufferRef.current.push(e.data)
         const totalReceived = receiveBufferRef.current.reduce((s, b) => s + b.byteLength, 0)
         setReceiving((prev) => prev ? { ...prev, received: totalReceived } : null)
@@ -116,7 +142,7 @@ export default function useFileTransfer() {
 
     pc.oniceconnectionstatechange = () => {
       const state = pc.iceConnectionState
-      if (state === 'failed') setError('Connection failed. Please try again.')
+      if (state === 'failed') setError('Connection failed. Both users may be behind strict firewalls that block direct connections.')
       if (state === 'connected') setError(null)
     }
 
@@ -126,7 +152,6 @@ export default function useFileTransfer() {
   const waitForIce = () =>
     new Promise((resolve) => {
       resolveIceRef.current = resolve
-      // Don't hang forever waiting for STUN — 2s is enough for data channels
       setTimeout(resolve, 2000)
     })
 
@@ -181,7 +206,7 @@ export default function useFileTransfer() {
     } catch (err) {
       setConnectionState('idle')
       setGenerating(false)
-      setError('Invalid code. Please check and try again.')
+      setError(getDecodeError(err, 'code'))
       throw err
     }
   }, [createPeerConnection, setupDataChannel])
@@ -192,7 +217,7 @@ export default function useFileTransfer() {
       const answerDesc = await decode(answerCode)
       await pcRef.current.setRemoteDescription(new RTCSessionDescription(answerDesc))
     } catch (err) {
-      setError('Invalid response code. Please check and try again.')
+      setError(getDecodeError(err, 'response code'))
     }
   }, [])
 
@@ -203,7 +228,6 @@ export default function useFileTransfer() {
       return
     }
 
-    // Send metadata
     dc.send(JSON.stringify({
       type: 'file-start',
       name: file.name,
@@ -219,7 +243,6 @@ export default function useFileTransfer() {
     const sendChunk = () => {
       while (offset < buffer.byteLength) {
         if (dc.bufferedAmount > CHUNK_SIZE * 8) {
-          // Backpressure — wait for buffer to drain
           dc.onbufferedamountlow = () => {
             dc.onbufferedamountlow = null
             sendChunk()
@@ -233,7 +256,6 @@ export default function useFileTransfer() {
         setSending({ name: file.name, size: file.size, sent: offset })
       }
 
-      // Done
       dc.send(JSON.stringify({ type: 'file-end' }))
       setSending(null)
     }

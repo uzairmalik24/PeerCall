@@ -285,9 +285,13 @@ export default function Share() {
               {role === 'sender' && offer && (
                 <div className="panel" ref={panelRef}>
                   <div className="panel-step">
-                    <span className="step-badge">Step 1</span>
-                    <h3>Share This Code</h3>
-                    <p>Send this to the person you want to share files with.</p>
+                    <span className="step-badge">Step 1 of 2</span>
+                    <h3>Send This Code to the Other Person</h3>
+                    <p>
+                      Copy the code below and send it via any messaging app.
+                      They need the <strong>entire code</strong> — do not edit
+                      or shorten it.
+                    </p>
                   </div>
                   <div className="code-area">
                     <textarea
@@ -311,13 +315,17 @@ export default function Share() {
                   <div className="panel-divider" />
 
                   <div className="panel-step">
-                    <span className="step-badge">Step 2</span>
-                    <h3>Paste Their Response</h3>
-                    <p>Once they send back a response code, paste it here.</p>
+                    <span className="step-badge">Step 2 of 2</span>
+                    <h3>Paste Their Response Code Here</h3>
+                    <p>
+                      The other person will generate a <strong>different
+                      code</strong> after pasting yours. Ask them to send that
+                      response code back and paste it below.
+                    </p>
                   </div>
                   <div className="code-area">
                     <textarea
-                      placeholder="Paste the response code here..."
+                      placeholder="Paste the response code you received..."
                       value={peerCode}
                       onChange={(e) => setPeerCode(e.target.value)}
                       rows={3}
@@ -331,18 +339,27 @@ export default function Share() {
                       Connect
                     </button>
                   </div>
+                  <p className="panel-tip">
+                    Make sure you paste the <strong>response</strong> code, not
+                    your own code. The two codes are different.
+                  </p>
                 </div>
               )}
 
               {role === 'receiver' && !answer && !generating && (
                 <div className="panel" ref={panelRef}>
                   <div className="panel-step">
-                    <h3>Paste the Sender's Code</h3>
-                    <p>Paste the code that was shared with you.</p>
+                    <h3>Paste the Code You Received</h3>
+                    <p>
+                      Someone shared a connection code with you. Paste the
+                      <strong> entire code</strong> below — don't edit or
+                      shorten it. After clicking "Generate Response", a new code
+                      will appear that you need to send back to them.
+                    </p>
                   </div>
                   <div className="code-area">
                     <textarea
-                      placeholder="Paste the code here..."
+                      placeholder="Paste the code you received here..."
                       value={peerCode}
                       onChange={(e) => setPeerCode(e.target.value)}
                       rows={3}
@@ -362,8 +379,13 @@ export default function Share() {
               {role === 'receiver' && answer && (
                 <div className="panel" ref={panelRef}>
                   <div className="panel-step">
-                    <h3>Send This Code Back</h3>
-                    <p>Copy this and send it to the other person.</p>
+                    <h3>Send This Response Code Back</h3>
+                    <p>
+                      Copy this code and send it back to the person who shared
+                      the first code with you. They'll paste it on their end to
+                      complete the connection. Copy the <strong>entire
+                      code</strong>.
+                    </p>
                   </div>
                   <div className="code-area">
                     <textarea
