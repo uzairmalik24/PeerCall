@@ -7,6 +7,16 @@ const ICE_SERVERS = [
 
 const CHUNK_SIZE = 64 * 1024
 
+function toBase64Url(str) {
+  return btoa(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+}
+
+function fromBase64Url(str) {
+  let b64 = str.replace(/-/g, '+').replace(/_/g, '/')
+  while (b64.length % 4) b64 += '='
+  return atob(b64)
+}
+
 async function encode(desc) {
   const raw = (desc.type === 'offer' ? 'O' : 'A') + desc.sdp
   const blob = new Blob([raw])
@@ -16,7 +26,7 @@ async function encode(desc) {
   const bytes = new Uint8Array(buf)
   let bin = ''
   for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i])
-  return btoa(bin)
+  return toBase64Url(bin)
 }
 
 async function decode(str) {
@@ -24,9 +34,13 @@ async function decode(str) {
 
   let bin
   try {
-    bin = atob(cleaned)
+    bin = fromBase64Url(cleaned)
   } catch {
-    throw new Error('DECODE_FAILED')
+    try {
+      bin = atob(cleaned)
+    } catch {
+      throw new Error('DECODE_FAILED')
+    }
   }
 
   const bytes = new Uint8Array(bin.length)
@@ -151,8 +165,10 @@ export default function useFileTransfer() {
 
   const waitForIce = () =>
     new Promise((resolve) => {
-      resolveIceRef.current = resolve
-      setTimeout(resolve, 2000)
+      let resolved = false
+      const done = () => { if (!resolved) { resolved = true; resolve() } }
+      resolveIceRef.current = done
+      setTimeout(done, 5000)
     })
 
   const createOffer = useCallback(async () => {
