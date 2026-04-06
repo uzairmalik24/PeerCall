@@ -399,9 +399,10 @@ export default function Share() {
                 <div className="panel-header">
                   <h2>Share Files</h2>
                   <p>
-                    Send files directly between browsers. No upload limits, no
-                    server storage. Files transfer peer-to-peer and are never
-                    stored anywhere.
+                    Send files directly between browsers with zero quality loss.
+                    No upload limits, no compression, no server storage. Files
+                    transfer bit-for-bit identical over a dedicated P2P data
+                    channel.
                   </p>
                 </div>
                 <div className="panel-buttons">

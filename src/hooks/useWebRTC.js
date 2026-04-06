@@ -297,7 +297,11 @@ export default function useWebRTC() {
   }, [])
 
   const waitForIceCandidates = () =>
-    new Promise((resolve) => { resolveIceRef.current = resolve })
+    new Promise((resolve) => {
+      resolveIceRef.current = resolve
+      // Don't wait forever for STUN — 3s is enough to get host + srflx candidates
+      setTimeout(resolve, 3000)
+    })
 
   const createOffer = useCallback(async (video = true) => {
     try {

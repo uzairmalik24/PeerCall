@@ -7,7 +7,6 @@ import {
   Shield,
   Zap,
   Globe,
-  Heart,
   ArrowRight,
   Link2,
   Send,
@@ -24,61 +23,31 @@ import {
   Clipboard,
   Check,
   FileUp,
+  FileDown,
+  Upload,
+  Download,
 } from 'lucide-react'
 import Logo from '../components/Logo'
 import './Home.css'
 
 gsap.registerPlugin(ScrollTrigger)
 
-const guideSteps = [
-  {
-    num: '01',
-    title: 'Open the Call Page',
-    role: 'Caller',
-    description:
-      'Navigate to the Call page and click "Create a Call". Toggle video on or off before starting. This initiates your side of the peer-to-peer handshake.',
-    icon: MousePointer2,
-  },
-  {
-    num: '02',
-    title: 'Grant Browser Permissions',
-    role: 'Caller',
-    description:
-      'Your browser will request camera and microphone access. Grant it to proceed. You\'ll see a live preview of your own feed confirming everything works.',
-    icon: Camera,
-  },
-  {
-    num: '03',
-    title: 'Copy & Share Your Code',
-    role: 'Caller',
-    description:
-      'A connection code appears — click "Copy Code" and send it to your contact through any messaging app. This code is single-use and session-specific.',
-    icon: Copy,
-  },
-  {
-    num: '04',
-    title: 'Receiver Pastes Your Code',
-    role: 'Receiver',
-    description:
-      'The other person opens PeerCall, clicks "Join a Call", and pastes your code. They click "Generate Response" and allow their own camera/mic access.',
-    icon: Clipboard,
-  },
-  {
-    num: '05',
-    title: 'Receiver Sends Response Back',
-    role: 'Receiver',
-    description:
-      'A response code is generated on their end. They copy it and send it back to you through the same messaging channel. This completes the signaling handshake.',
-    icon: Send,
-  },
-  {
-    num: '06',
-    title: 'Connection Established',
-    role: 'Both',
-    description:
-      'Paste the response code and click "Connect". The peer-to-peer link goes live — audio and video flow directly between browsers. No server involved.',
-    icon: Check,
-  },
+const callGuideSteps = [
+  { num: '01', title: 'Open the Call Page', role: 'Caller', description: 'Navigate to the Call page and click "Create a Call". Toggle video on or off before starting. This initiates your side of the peer-to-peer handshake.', icon: MousePointer2 },
+  { num: '02', title: 'Grant Browser Permissions', role: 'Caller', description: 'Your browser will request camera and microphone access. Grant it to proceed. You\'ll see a live preview of your own feed confirming everything works.', icon: Camera },
+  { num: '03', title: 'Copy & Share Your Code', role: 'Caller', description: 'A connection code appears — click "Copy Code" and send it to your contact through any messaging app. This code is single-use and session-specific.', icon: Copy },
+  { num: '04', title: 'Receiver Pastes Your Code', role: 'Receiver', description: 'The other person opens PeerCall, clicks "Join a Call", and pastes your code. They click "Generate Response" and allow their own camera/mic access.', icon: Clipboard },
+  { num: '05', title: 'Receiver Sends Response Back', role: 'Receiver', description: 'A response code is generated on their end. They copy it and send it back to you through the same messaging channel. This completes the signaling handshake.', icon: Send },
+  { num: '06', title: 'Connection Established', role: 'Both', description: 'Paste the response code and click "Connect". The peer-to-peer link goes live — audio and video flow directly between browsers. No server involved.', icon: Check },
+]
+
+const fileGuideSteps = [
+  { num: '01', title: 'Open the Share Page', role: 'Sender', description: 'Go to the Share Files page and click "Create Connection". No permissions needed — file sharing only uses a data channel, no camera or mic.', icon: MousePointer2 },
+  { num: '02', title: 'Send Your Code', role: 'Sender', description: 'A short connection code is generated. Copy it and send it to the person you want to share files with. The code is much shorter than a call code since there are no media codecs.', icon: Copy },
+  { num: '03', title: 'Receiver Joins', role: 'Receiver', description: 'The other person clicks "Join Connection", pastes your code, and clicks "Generate Response". A response code appears on their end.', icon: Clipboard },
+  { num: '04', title: 'Exchange Response', role: 'Both', description: 'The receiver sends their response code back. The sender pastes it and clicks "Connect". The peer-to-peer data channel opens.', icon: Send },
+  { num: '05', title: 'Drop Files to Send', role: 'Both', description: 'Drag and drop any file into the drop zone or click to browse. Files are chunked into 64KB pieces and sent directly — both sides can send and receive simultaneously.', icon: Upload },
+  { num: '06', title: 'Download Received Files', role: 'Both', description: 'Received files appear instantly with a download button. Files arrive bit-for-bit identical — zero quality loss, no compression, no re-encoding. Just raw bytes.', icon: Download },
 ]
 
 function FaqItem({ question, children }) {
@@ -125,56 +94,53 @@ export default function Home() {
   const featuresRef = useRef(null)
   const stepsRef = useRef(null)
   const guideRef = useRef(null)
+  const fileSectionRef = useRef(null)
   const faqRef = useRef(null)
+  const [guideMode, setGuideMode] = useState('call') // 'call' | 'file'
+
+  const activeGuideSteps = guideMode === 'call' ? callGuideSteps : fileGuideSteps
 
   useEffect(() => {
     const ctx = gsap.context(() => {
       gsap.from('.hero-anim', {
-        y: 30,
-        opacity: 0,
-        duration: 0.8,
-        stagger: 0.12,
-        ease: 'power3.out',
+        y: 30, opacity: 0, duration: 0.8, stagger: 0.12, ease: 'power3.out',
       })
 
       gsap.from('.feature-card', {
         scrollTrigger: { trigger: featuresRef.current, start: 'top 80%' },
-        y: 40,
-        opacity: 0,
-        duration: 0.6,
-        stagger: 0.1,
-        ease: 'power2.out',
+        y: 40, opacity: 0, duration: 0.6, stagger: 0.1, ease: 'power2.out',
       })
 
       gsap.from('.step-card', {
         scrollTrigger: { trigger: stepsRef.current, start: 'top 80%' },
-        y: 40,
-        opacity: 0,
-        duration: 0.6,
-        stagger: 0.12,
-        ease: 'power2.out',
+        y: 40, opacity: 0, duration: 0.6, stagger: 0.12, ease: 'power2.out',
+      })
+
+      // File highlight section
+      gsap.from('.file-highlight-content', {
+        scrollTrigger: { trigger: fileSectionRef.current, start: 'top 80%' },
+        y: 40, opacity: 0, duration: 0.7, ease: 'power2.out',
       })
 
       gsap.from('.faq-item', {
         scrollTrigger: { trigger: faqRef.current, start: 'top 80%' },
-        y: 20,
-        opacity: 0,
-        duration: 0.5,
-        stagger: 0.08,
-        ease: 'power2.out',
+        y: 20, opacity: 0, duration: 0.5, stagger: 0.08, ease: 'power2.out',
       })
 
       gsap.utils.toArray('.section-title').forEach((el) => {
         gsap.from(el, {
           scrollTrigger: { trigger: el, start: 'top 85%' },
-          y: 20,
-          opacity: 0,
-          duration: 0.6,
-          ease: 'power2.out',
+          y: 20, opacity: 0, duration: 0.6, ease: 'power2.out',
         })
       })
+    })
 
-      // Guide scroll-based
+    return () => ctx.revert()
+  }, [])
+
+  // Guide scroll-based activation
+  useEffect(() => {
+    const ctx = gsap.context(() => {
       const guideItems = gsap.utils.toArray('.guide-step')
       const numDisplay = document.querySelector('.guide-active-num')
       const titleDisplay = document.querySelector('.guide-active-title')
@@ -182,18 +148,20 @@ export default function Home() {
       const progressFill = document.querySelector('.guide-progress-fill')
 
       if (guideItems.length && numDisplay) {
+        const triggers = []
+
         guideItems.forEach((step, i) => {
-          ScrollTrigger.create({
+          triggers.push(ScrollTrigger.create({
             trigger: step,
             start: 'top 55%',
             end: 'bottom 45%',
             onEnter: () => activateStep(i),
             onEnterBack: () => activateStep(i),
-          })
+          }))
         })
 
         function activateStep(i) {
-          const data = guideSteps[i]
+          const data = activeGuideSteps[i]
           if (!data) return
 
           guideItems.forEach((el, j) => {
@@ -201,9 +169,7 @@ export default function Home() {
           })
 
           gsap.to(numDisplay, {
-            opacity: 0,
-            y: -6,
-            duration: 0.12,
+            opacity: 0, y: -6, duration: 0.12,
             onComplete: () => {
               numDisplay.textContent = data.num
               gsap.to(numDisplay, { opacity: 1, y: 0, duration: 0.2 })
@@ -211,8 +177,7 @@ export default function Home() {
           })
 
           gsap.to(titleDisplay, {
-            opacity: 0,
-            duration: 0.1,
+            opacity: 0, duration: 0.1,
             onComplete: () => {
               titleDisplay.textContent = data.title
               gsap.to(titleDisplay, { opacity: 1, duration: 0.18 })
@@ -222,7 +187,7 @@ export default function Home() {
           roleDisplay.textContent = data.role
           roleDisplay.className =
             'guide-active-role ' +
-            (data.role === 'Caller'
+            (data.role === 'Caller' || data.role === 'Sender'
               ? 'role-caller'
               : data.role === 'Receiver'
                 ? 'role-receiver'
@@ -230,27 +195,28 @@ export default function Home() {
 
           if (progressFill) {
             gsap.to(progressFill, {
-              scaleY: (i + 1) / guideSteps.length,
-              duration: 0.4,
-              ease: 'power2.out',
+              scaleY: (i + 1) / activeGuideSteps.length,
+              duration: 0.4, ease: 'power2.out',
             })
           }
         }
 
         activateStep(0)
+
+        return () => triggers.forEach((t) => t.kill())
       }
     })
 
     return () => ctx.revert()
-  }, [])
+  }, [guideMode, activeGuideSteps])
 
   return (
     <>
       <Helmet>
-        <title>PeerCall — Free P2P Video & Audio Calls | No Server Needed</title>
+        <title>PeerCall — Free P2P Video Calls & File Sharing | No Server Needed</title>
         <meta
           name="description"
-          content="Make free peer-to-peer video and audio calls directly in your browser using WebRTC. No sign-up, no servers, no downloads required. Share a code and connect instantly."
+          content="Make free peer-to-peer video calls and share files directly in your browser using WebRTC. No sign-up, no servers, no downloads. Zero quality loss on file transfers."
         />
         <link rel="canonical" href="/" />
       </Helmet>
@@ -265,6 +231,7 @@ export default function Home() {
             <div className="nav-links">
               <a href="#features">Features</a>
               <a href="#how-it-works">How It Works</a>
+              <a href="#file-sharing">File Sharing</a>
               <a href="#guide">Guide</a>
               <a href="#faq">FAQ</a>
               <Link to="/share">Share Files</Link>
@@ -375,19 +342,19 @@ export default function Home() {
               <article className="feature-card">
                 <div className="feature-top">
                   <FileUp size={18} className="feature-ic" />
-                  <h3>File Sharing</h3>
+                  <h3>Lossless File Sharing</h3>
                 </div>
                 <p>
-                  Send any file directly to another browser — images, videos,
-                  documents, anything. No upload limits, no server storage.
-                  Files transfer peer-to-peer and are never stored anywhere.
+                  Send any file directly to another browser with zero quality
+                  loss. Files transfer bit-for-bit over a dedicated data channel
+                  — no compression, no upload limits, no server storage.
                 </p>
               </article>
             </div>
           </div>
         </section>
 
-        {/* How it works */}
+        {/* How it works — tabbed for Call / File */}
         <section className="how-it-works" id="how-it-works" ref={stepsRef}>
           <div className="container">
             <h2 className="section-title">How It Works</h2>
@@ -397,12 +364,11 @@ export default function Home() {
             <div className="steps-row">
               <div className="step-card">
                 <span className="step-label">Step 1</span>
-                <h3>Create a Call</h3>
+                <h3>Create a Connection</h3>
                 <p>
-                  Open the call page and click "Create a Call". Choose between
-                  video or audio-only. Your browser will ask for camera and
-                  microphone permissions — once granted, a unique connection
-                  code is generated.
+                  Open the Call or Share page and click "Create". For calls,
+                  grant camera/mic permissions. For files, no permissions
+                  needed. A unique connection code is generated.
                 </p>
               </div>
               <div className="step-connector">
@@ -410,11 +376,11 @@ export default function Home() {
               </div>
               <div className="step-card">
                 <span className="step-label">Step 2</span>
-                <h3>Share the Code</h3>
+                <h3>Exchange Codes</h3>
                 <p>
-                  Copy your connection code and send it to the person you want
-                  to call through any channel — WhatsApp, Telegram, email, or
-                  SMS. The code is single-use and session-specific.
+                  Send your code to the other person via any channel. They
+                  paste it to generate a response code. They send that back
+                  to you. This two-way exchange replaces a signaling server.
                 </p>
               </div>
               <div className="step-connector">
@@ -422,24 +388,107 @@ export default function Home() {
               </div>
               <div className="step-card">
                 <span className="step-label">Step 3</span>
-                <h3>Connect</h3>
+                <h3>Connected</h3>
                 <p>
-                  The other person pastes your code, generates a response, and
-                  sends it back. Once you paste it in, the peer-to-peer
-                  connection is established and audio/video flows directly.
+                  Paste the response and click "Connect". For calls, audio and
+                  video flow directly. For file sharing, drag and drop any file
+                  — it transfers bit-for-bit with zero quality loss.
                 </p>
               </div>
             </div>
           </div>
         </section>
 
-        {/* Guide */}
+        {/* File Sharing Highlight */}
+        <section className="file-highlight" id="file-sharing" ref={fileSectionRef}>
+          <div className="container">
+            <div className="file-highlight-content">
+              <div className="file-highlight-text">
+                <span className="file-highlight-badge">Zero Quality Loss</span>
+                <h2>File Sharing,<br />Without the Middleman</h2>
+                <p>
+                  Unlike cloud services that compress your images, re-encode
+                  your videos, and scan your documents — PeerCall sends files as
+                  raw bytes directly from one browser to another. What you send
+                  is exactly what arrives. No thumbnailing, no transcoding, no
+                  lossy optimization.
+                </p>
+                <ul className="file-highlight-list">
+                  <li>
+                    <CheckCircle2 size={16} />
+                    <span>Bit-for-bit identical — verified by checksum</span>
+                  </li>
+                  <li>
+                    <CheckCircle2 size={16} />
+                    <span>No file size limits — send GBs if your connection holds</span>
+                  </li>
+                  <li>
+                    <CheckCircle2 size={16} />
+                    <span>No server storage — files are never uploaded anywhere</span>
+                  </li>
+                  <li>
+                    <CheckCircle2 size={16} />
+                    <span>Both sides can send and receive simultaneously</span>
+                  </li>
+                  <li>
+                    <CheckCircle2 size={16} />
+                    <span>Encrypted in transit via DTLS — same as calls</span>
+                  </li>
+                </ul>
+                <Link to="/share" className="btn btn-primary btn-lg">
+                  Share Files Now
+                  <ArrowRight size={17} />
+                </Link>
+              </div>
+              <div className="file-highlight-visual">
+                <div className="file-visual-card">
+                  <div className="file-visual-row">
+                    <Upload size={18} />
+                    <div>
+                      <span className="file-visual-name">photo_original.png</span>
+                      <span className="file-visual-size">24.8 MB</span>
+                    </div>
+                  </div>
+                  <div className="file-visual-arrow">
+                    <ArrowDown size={16} />
+                    <span>Direct P2P transfer</span>
+                    <ArrowDown size={16} />
+                  </div>
+                  <div className="file-visual-row">
+                    <Download size={18} />
+                    <div>
+                      <span className="file-visual-name">photo_original.png</span>
+                      <span className="file-visual-size">24.8 MB — identical</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* Guide — tabbed Call / File */}
         <section className="guide" id="guide" ref={guideRef}>
           <div className="container">
             <h2 className="section-title">Step-by-Step Guide</h2>
             <p className="section-sub">
               Scroll through each step of the connection process.
             </p>
+
+            <div className="guide-tabs">
+              <button
+                className={`guide-tab ${guideMode === 'call' ? 'guide-tab-active' : ''}`}
+                onClick={() => setGuideMode('call')}
+              >
+                Video Call
+              </button>
+              <button
+                className={`guide-tab ${guideMode === 'file' ? 'guide-tab-active' : ''}`}
+                onClick={() => setGuideMode('file')}
+              >
+                File Sharing
+              </button>
+            </div>
 
             <div className="guide-layout">
               <div className="guide-sticky">
@@ -448,38 +497,35 @@ export default function Home() {
                     <div className="guide-progress-fill" />
                   </div>
                   <div className="guide-active-num">01</div>
-                  <div className="guide-active-title">Open the Call Page</div>
-                  <div className="guide-active-role role-caller">Caller</div>
+                  <div className="guide-active-title">{activeGuideSteps[0].title}</div>
+                  <div className="guide-active-role role-caller">{activeGuideSteps[0].role}</div>
                 </div>
               </div>
 
-              <div className="guide-steps">
-                {guideSteps.map((step, i) => {
-                  const Icon = step.icon
-                  return (
-                    <div
-                      className={`guide-step ${i === 0 ? 'guide-step-active' : ''}`}
-                      key={i}
-                    >
-                      <div className="guide-step-header">
-                        <span className="guide-step-num">{step.num}</span>
-                        <span
-                          className={`guide-step-role ${
-                            step.role === 'Caller'
-                              ? 'role-caller'
-                              : step.role === 'Receiver'
-                                ? 'role-receiver'
-                                : 'role-both'
-                          }`}
-                        >
-                          {step.role}
-                        </span>
-                      </div>
-                      <h4>{step.title}</h4>
-                      <p>{step.description}</p>
+              <div className="guide-steps" key={guideMode}>
+                {activeGuideSteps.map((step, i) => (
+                  <div
+                    className={`guide-step ${i === 0 ? 'guide-step-active' : ''}`}
+                    key={`${guideMode}-${i}`}
+                  >
+                    <div className="guide-step-header">
+                      <span className="guide-step-num">{step.num}</span>
+                      <span
+                        className={`guide-step-role ${
+                          step.role === 'Caller' || step.role === 'Sender'
+                            ? 'role-caller'
+                            : step.role === 'Receiver'
+                              ? 'role-receiver'
+                              : 'role-both'
+                        }`}
+                      >
+                        {step.role}
+                      </span>
                     </div>
-                  )
-                })}
+                    <h4>{step.title}</h4>
+                    <p>{step.description}</p>
+                  </div>
+                ))}
               </div>
             </div>
           </div>
@@ -509,7 +555,7 @@ export default function Home() {
                   encryption, which is mandatory and cannot be disabled. Your
                   media is encrypted end-to-end between the two browsers. No
                   third party — including PeerCall itself — can intercept or
-                  listen to your calls.
+                  listen to your calls. File transfers use the same encryption.
                 </p>
               </FaqItem>
 
@@ -536,36 +582,47 @@ export default function Home() {
                 <p>
                   No. PeerCall runs entirely in your browser — nothing to
                   download, no extensions, no account creation. Just open the
-                  page and start a call.
+                  page and start a call or share files.
                 </p>
               </FaqItem>
 
               <FaqItem question="Why do I have to copy and paste codes manually?">
                 <p>
                   The code exchange replaces the signaling server that most
-                  video apps use behind the scenes. You manually exchange the
-                  codes through any channel you trust, which means no backend
+                  apps use behind the scenes. You manually exchange the codes
+                  through any channel you trust, which means no backend
                   infrastructure is needed and no third party ever knows who
-                  you're calling.
+                  you're connecting with.
+                </p>
+              </FaqItem>
+
+              <FaqItem question="Does file sharing reduce quality or compress my files?">
+                <p>
+                  No. Files are sent as raw bytes through a dedicated
+                  RTCDataChannel — a binary pipe separate from audio/video
+                  streams. There is zero quality loss. Files arrive bit-for-bit
+                  identical to the original. No compression, no re-encoding, no
+                  thumbnailing. Unlike cloud services like WhatsApp or Google
+                  Drive, PeerCall never touches your files.
+                </p>
+              </FaqItem>
+
+              <FaqItem question="Is there a file size limit?">
+                <p>
+                  There's no server-imposed size limit. Files are chunked into
+                  64KB pieces and streamed directly between browsers. The only
+                  constraint is your browser's available memory and the
+                  stability of the P2P connection. In practice, multi-GB
+                  transfers work fine on stable connections.
                 </p>
               </FaqItem>
 
               <FaqItem question="Is there a time limit or participant limit?">
                 <p>
-                  No time limit — your call can last as long as you want.
-                  PeerCall currently supports 1-to-1 calls. Group calling is
-                  not currently supported.
-                </p>
-              </FaqItem>
-
-              <FaqItem question="How does file sharing work? Is there a size limit?">
-                <p>
-                  File sharing uses the same WebRTC peer-to-peer connection but
-                  through an RTCDataChannel instead of media streams. Files are
-                  split into 64KB chunks and sent directly between browsers.
-                  There's no server-side size limit — the only constraint is
-                  your browser's available memory and connection stability.
-                  Files are never uploaded to or stored on any server.
+                  No time limit — your call or file sharing session can last as
+                  long as you want. PeerCall currently supports 1-to-1
+                  connections. Group calls and multi-party file sharing are not
+                  currently supported.
                 </p>
               </FaqItem>
             </div>
@@ -601,7 +658,7 @@ export default function Home() {
               <Logo size={24} />
               <span>PeerCall</span>
             </div>
-            <p>Open-source peer-to-peer calling. Built with WebRTC & React.</p>
+            <p>Open-source peer-to-peer calling & file sharing. Built with WebRTC & React.</p>
           </div>
         </footer>
       </div>

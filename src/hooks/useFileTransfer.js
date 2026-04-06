@@ -124,7 +124,11 @@ export default function useFileTransfer() {
   }, [])
 
   const waitForIce = () =>
-    new Promise((resolve) => { resolveIceRef.current = resolve })
+    new Promise((resolve) => {
+      resolveIceRef.current = resolve
+      // Don't hang forever waiting for STUN — 2s is enough for data channels
+      setTimeout(resolve, 2000)
+    })
 
   const createOffer = useCallback(async () => {
     try {
