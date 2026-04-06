@@ -56,7 +56,18 @@ function minifySdp(sdp) {
   return out.join('\r\n')
 }
 
-// Encode: minify SDP → type prefix + raw SDP → deflate → base64
+// URL-safe base64: replace + → - and / → _ to avoid messaging app mangling
+function toBase64Url(str) {
+  return btoa(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+}
+
+function fromBase64Url(str) {
+  let b64 = str.replace(/-/g, '+').replace(/_/g, '/')
+  while (b64.length % 4) b64 += '='
+  return atob(b64)
+}
+
+// Encode: minify SDP → type prefix + raw SDP → deflate → URL-safe base64
 async function encode(desc) {
   const minified = minifySdp(desc.sdp)
   const raw = (desc.type === 'offer' ? 'O' : 'A') + minified
@@ -67,19 +78,24 @@ async function encode(desc) {
   const bytes = new Uint8Array(buf)
   let bin = ''
   for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i])
-  return btoa(bin)
+  return toBase64Url(bin)
 }
 
-// Decode: base64 → inflate → type prefix + raw SDP
+// Decode: URL-safe base64 → inflate → type prefix + raw SDP
 async function decode(str) {
   // Clean whitespace, newlines, and invisible chars that messaging apps add
   const cleaned = str.trim().replace(/[\s\r\n\t\u200B\u200C\u200D\uFEFF]/g, '')
 
   let bin
   try {
-    bin = atob(cleaned)
+    // Try URL-safe base64 first, fall back to standard base64
+    bin = fromBase64Url(cleaned)
   } catch {
-    throw new Error('DECODE_FAILED')
+    try {
+      bin = atob(cleaned)
+    } catch {
+      throw new Error('DECODE_FAILED')
+    }
   }
 
   const bytes = new Uint8Array(bin.length)
@@ -168,8 +184,11 @@ export default function useWebRTC() {
 
   const waitForIceCandidates = () =>
     new Promise((resolve) => {
-      resolveIceRef.current = resolve
-      setTimeout(resolve, 3000)
+      let resolved = false
+      const done = () => { if (!resolved) { resolved = true; resolve() } }
+      resolveIceRef.current = done
+      // Need enough time for STUN to discover public IP (required for cross-network calls)
+      setTimeout(done, 5000)
     })
 
   const createOffer = useCallback(async (video = true) => {
