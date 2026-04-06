@@ -133,6 +133,22 @@ export default function Home() {
           y: 20, opacity: 0, duration: 0.6, ease: 'power2.out',
         })
       })
+
+      // Footer name — characters slide up and fade in on scroll
+      gsap.from('.footer-name-char', {
+        scrollTrigger: { trigger: '.footer-marquee', start: 'top 90%' },
+        y: 80,
+        opacity: 0,
+        duration: 0.8,
+        stagger: 0.05,
+        ease: 'power3.out',
+      })
+
+      // Footer bottom slides up
+      gsap.from('.footer-bottom', {
+        scrollTrigger: { trigger: '.footer-bottom', start: 'top 95%' },
+        y: 30, opacity: 0, duration: 0.6, ease: 'power2.out',
+      })
     })
 
     return () => ctx.revert()
@@ -653,12 +669,46 @@ export default function Home() {
         </section>
 
         <footer className="footer">
-          <div className="footer-inner">
-            <div className="footer-brand">
-              <Logo size={24} />
-              <span>PeerCall</span>
+          <div className="footer-marquee">
+            <h2 className="footer-name" aria-hidden="true">
+              <span className="footer-name-char">P</span>
+              <span className="footer-name-char">e</span>
+              <span className="footer-name-char">e</span>
+              <span className="footer-name-char">r</span>
+              <span className="footer-name-char">C</span>
+              <span className="footer-name-char">a</span>
+              <span className="footer-name-char">l</span>
+              <span className="footer-name-char">l</span>
+            </h2>
+          </div>
+          <div className="footer-bottom">
+            <div className="footer-bottom-inner">
+              <div className="footer-col">
+                <span className="footer-label">Product</span>
+                <Link to="/call">Video Call</Link>
+                <Link to="/share">File Sharing</Link>
+              </div>
+              <div className="footer-col">
+                <span className="footer-label">Resources</span>
+                <a href="#how-it-works">How It Works</a>
+                <a href="#guide">Guide</a>
+                <a href="#faq">FAQ</a>
+              </div>
+              <div className="footer-col">
+                <span className="footer-label">Built with</span>
+                <span>WebRTC</span>
+                <span>React</span>
+                <span>GSAP</span>
+              </div>
+              <div className="footer-col footer-col-end">
+                <Logo size={28} />
+                <p>Open-source peer-to-peer<br />calling & file sharing.</p>
+              </div>
             </div>
-            <p>Open-source peer-to-peer calling & file sharing. Built with WebRTC & React.</p>
+            <div className="footer-bar">
+              <span>&copy; {new Date().getFullYear()} PeerCall</span>
+              <span>No servers. No tracking. No BS.</span>
+            </div>
           </div>
         </footer>
       </div>
