@@ -574,6 +574,13 @@
   margin-right: auto;
 }
 
+.cta-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
 /* ─── Footer ─── */
 .footer {
   border-top: 1px solid var(--border);

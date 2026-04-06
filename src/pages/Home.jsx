@@ -23,6 +23,7 @@ import {
   Copy,
   Clipboard,
   Check,
+  FileUp,
 } from 'lucide-react'
 import Logo from '../components/Logo'
 import './Home.css'
@@ -266,6 +267,7 @@ export default function Home() {
               <a href="#how-it-works">How It Works</a>
               <a href="#guide">Guide</a>
               <a href="#faq">FAQ</a>
+              <Link to="/share">Share Files</Link>
             </div>
             <Link to="/call" className="nav-cta">
               Start Call
@@ -283,14 +285,14 @@ export default function Home() {
             </div>
 
             <h1 className="hero-anim">
-              Video & Audio Calls,<br />
+              Calls & File Sharing,<br />
               <span className="gradient-text">Directly Peer-to-Peer</span>
             </h1>
 
             <p className="hero-sub hero-anim">
-              No servers. No sign-ups. No downloads. Connect directly with
-              anyone by sharing a simple code. Powered by WebRTC — your
-              conversations never leave your devices.
+              No servers. No sign-ups. No downloads. Make video calls and share
+              files directly between browsers by exchanging a simple code.
+              Powered by WebRTC — nothing leaves your devices.
             </p>
 
             <div className="hero-actions hero-anim">
@@ -298,10 +300,10 @@ export default function Home() {
                 Start a Call
                 <ArrowRight size={17} />
               </Link>
-              <a href="#how-it-works" className="btn btn-secondary btn-lg">
-                How It Works
-                <ArrowDown size={17} />
-              </a>
+              <Link to="/share" className="btn btn-secondary btn-lg">
+                Share Files
+                <FileUp size={17} />
+              </Link>
             </div>
 
             <div className="hero-trust hero-anim">
@@ -334,7 +336,7 @@ export default function Home() {
             <h2 className="section-title">Why PeerCall?</h2>
             <p className="section-sub">
               Built for privacy, simplicity, and speed — with nothing between
-              you and the person you're calling.
+              you and the person on the other end.
             </p>
             <div className="features-grid">
               <article className="feature-card">
@@ -372,13 +374,13 @@ export default function Home() {
               </article>
               <article className="feature-card">
                 <div className="feature-top">
-                  <Heart size={18} className="feature-ic" />
-                  <h3>Completely Free</h3>
+                  <FileUp size={18} className="feature-ic" />
+                  <h3>File Sharing</h3>
                 </div>
                 <p>
-                  No premium tiers, no time limits, no hidden fees. Calls go
-                  directly between browsers so there are no server costs to
-                  maintain. Free for everyone, forever.
+                  Send any file directly to another browser — images, videos,
+                  documents, anything. No upload limits, no server storage.
+                  Files transfer peer-to-peer and are never stored anywhere.
                 </p>
               </article>
             </div>
@@ -555,6 +557,17 @@ export default function Home() {
                   not currently supported.
                 </p>
               </FaqItem>
+
+              <FaqItem question="How does file sharing work? Is there a size limit?">
+                <p>
+                  File sharing uses the same WebRTC peer-to-peer connection but
+                  through an RTCDataChannel instead of media streams. Files are
+                  split into 64KB chunks and sent directly between browsers.
+                  There's no server-side size limit — the only constraint is
+                  your browser's available memory and connection stability.
+                  Files are never uploaded to or stored on any server.
+                </p>
+              </FaqItem>
             </div>
           </div>
         </section>
@@ -563,15 +576,21 @@ export default function Home() {
         <section className="cta-section">
           <div className="container container-sm">
             <div className="cta-card">
-              <h2>Ready to make a call?</h2>
+              <h2>Ready to connect?</h2>
               <p>
-                Start a free, encrypted, peer-to-peer call in under 30 seconds.
-                No sign-up required.
+                Start a free, encrypted, peer-to-peer call or share files in
+                seconds. No sign-up required.
               </p>
-              <Link to="/call" className="btn btn-primary btn-lg">
-                Start a Call
-                <ArrowRight size={17} />
-              </Link>
+              <div className="cta-actions">
+                <Link to="/call" className="btn btn-primary btn-lg">
+                  Start a Call
+                  <ArrowRight size={17} />
+                </Link>
+                <Link to="/share" className="btn btn-secondary btn-lg">
+                  Share Files
+                  <FileUp size={17} />
+                </Link>
+              </div>
             </div>
           </div>
         </section>
