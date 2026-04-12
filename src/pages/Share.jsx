@@ -61,9 +61,12 @@ export default function Share() {
   const [role, setRole] = useState(null)
   const [peerCode, setPeerCode] = useState('')
   const [copied, setCopied] = useState(false)
+  const [clipboardError, setClipboardError] = useState(null)
   const [dragOver, setDragOver] = useState(false)
   const fileInputRef = useRef(null)
   const panelRef = useRef(null)
+
+  const displayError = clipboardError || error
 
   const isConnected =
     connectionState === 'connected' || connectionState === 'completed'
@@ -93,6 +96,20 @@ export default function Share() {
 
   const handleSubmitAnswer = async () => {
     await acceptAnswer(peerCode.trim())
+  }
+
+  const pasteFromClipboard = async () => {
+    try {
+      const text = await navigator.clipboard.readText()
+      if (!text.trim()) {
+        setClipboardError('Clipboard is empty. Copy the full connection code first.')
+        return
+      }
+      setPeerCode(text)
+      setClipboardError(null)
+    } catch {
+      setClipboardError('Unable to read clipboard. Please allow clipboard access or paste the code manually.')
+    }
   }
 
   const copyToClipboard = (text) => {
@@ -162,7 +179,7 @@ export default function Share() {
         </nav>
 
         <div className="share-body">
-          {error && <div className="call-error">{error}</div>}
+          {displayError && <div className="call-error">{displayError}</div>}
 
           {/* Connected: file transfer UI */}
           {channelOpen && (
@@ -327,17 +344,29 @@ export default function Share() {
                     <textarea
                       placeholder="Paste the response code you received..."
                       value={peerCode}
-                      onChange={(e) => setPeerCode(e.target.value)}
+                      onChange={(e) => {
+                        setPeerCode(e.target.value)
+                        setClipboardError(null)
+                      }}
                       rows={3}
                     />
-                    <button
-                      className="btn btn-primary"
-                      onClick={handleSubmitAnswer}
-                      disabled={!peerCode.trim()}
-                    >
-                      <ArrowRight size={16} />
-                      Connect
-                    </button>
+                    <div className="code-actions">
+                      <button
+                        className="btn btn-ghost btn-sm"
+                        onClick={pasteFromClipboard}
+                        type="button"
+                      >
+                        Paste from clipboard
+                      </button>
+                      <button
+                        className="btn btn-primary"
+                        onClick={handleSubmitAnswer}
+                        disabled={!peerCode.trim()}
+                      >
+                        <ArrowRight size={16} />
+                        Connect
+                      </button>
+                    </div>
                   </div>
                   <p className="panel-tip">
                     Make sure you paste the <strong>response</strong> code, not
@@ -361,17 +390,29 @@ export default function Share() {
                     <textarea
                       placeholder="Paste the code you received here..."
                       value={peerCode}
-                      onChange={(e) => setPeerCode(e.target.value)}
+                      onChange={(e) => {
+                        setPeerCode(e.target.value)
+                        setClipboardError(null)
+                      }}
                       rows={3}
                     />
-                    <button
-                      className="btn btn-primary"
-                      onClick={handleSubmitOffer}
-                      disabled={!peerCode.trim()}
-                    >
-                      <Clipboard size={16} />
-                      Generate Response
-                    </button>
+                    <div className="code-actions">
+                      <button
+                        className="btn btn-ghost btn-sm"
+                        onClick={pasteFromClipboard}
+                        type="button"
+                      >
+                        Paste from clipboard
+                      </button>
+                      <button
+                        className="btn btn-primary"
+                        onClick={handleSubmitOffer}
+                        disabled={!peerCode.trim()}
+                      >
+                        <Clipboard size={16} />
+                        Generate Response
+                      </button>
+                    </div>
                   </div>
                 </div>
               )}

@@ -30,7 +30,7 @@ async function encode(desc) {
 }
 
 async function decode(str) {
-  const cleaned = str.trim().replace(/[\s\r\n\t\u200B\u200C\u200D\uFEFF]/g, '')
+  const cleaned = str.trim().replace(/[\s\u0000-\u001F\u007F-\u009F\u200B-\u200F\u2028-\u202F\u205F-\u206F\uFEFF]/g, '')
 
   let bin
   try {
@@ -208,6 +208,9 @@ export default function useFileTransfer() {
       }
 
       const offerDesc = await decode(offerCode)
+      if (offerDesc.type !== 'offer') {
+        throw new Error('UNEXPECTED_ANSWER_CODE')
+      }
       await pc.setRemoteDescription(new RTCSessionDescription(offerDesc))
 
       const answerDesc = await pc.createAnswer()
@@ -222,7 +225,11 @@ export default function useFileTransfer() {
     } catch (err) {
       setConnectionState('idle')
       setGenerating(false)
-      setError(getDecodeError(err, 'code'))
+      if (err.message === 'UNEXPECTED_ANSWER_CODE') {
+        setError('It looks like you pasted the response code instead of the original connection code. Paste the first code shared by the other laptop.')
+      } else {
+        setError(getDecodeError(err, 'code'))
+      }
       throw err
     }
   }, [createPeerConnection, setupDataChannel])
@@ -231,10 +238,17 @@ export default function useFileTransfer() {
     try {
       setError(null)
       const answerDesc = await decode(answerCode)
+      if (answerDesc.type !== 'answer') {
+        throw new Error('UNEXPECTED_OFFER_CODE')
+      }
       await pcRef.current.setRemoteDescription(new RTCSessionDescription(answerDesc))
     } catch (err) {
       console.error('Error accepting answer:', err)
-      setError(getDecodeError(err, 'response code'))
+      if (err.message === 'UNEXPECTED_OFFER_CODE') {
+        setError('It looks like you pasted the initial code instead of the response code. Paste the response code sent by the other laptop.')
+      } else {
+        setError(getDecodeError(err, 'response code'))
+      }
     }
   }, [])
 

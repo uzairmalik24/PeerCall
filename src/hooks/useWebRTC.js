@@ -84,7 +84,7 @@ async function encode(desc) {
 // Decode: URL-safe base64 → inflate → type prefix + raw SDP
 async function decode(str) {
   // Clean whitespace, newlines, and invisible chars that messaging apps add
-  const cleaned = str.trim().replace(/[\s\r\n\t\u200B\u200C\u200D\uFEFF]/g, '')
+  const cleaned = str.trim().replace(/[\s\u0000-\u001F\u007F-\u009F\u200B-\u200F\u2028-\u202F\u205F-\u206F\uFEFF]/g, '')
 
   let bin
   try {

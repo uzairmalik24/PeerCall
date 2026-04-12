@@ -213,6 +213,18 @@
   line-height: 1.5;
 }
 
+.code-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-top: 14px;
+}
+
+.code-actions .btn {
+  white-space: nowrap;
+}
+
 /* ─── Responsive ─── */
 @media (max-width: 640px) {
   .share-body {
