@@ -253,6 +253,14 @@ export default function useFileTransfer() {
     setChannelOpen(false)
   }, [])
 
+  const isConnectionHealthy = useCallback(() => {
+    const pc = pcRef.current
+    if (!pc || !pc.localDescription) return false
+    // Valid states for accepting an answer: have-local-offer
+    if (pc.signalingState !== 'have-local-offer') return false
+    return true
+  }, [])
+
   const disconnect = useCallback(() => {
     resetConnection(false)
   }, [resetConnection])
@@ -269,11 +277,12 @@ export default function useFileTransfer() {
         throw new Error('UNEXPECTED_OFFER_CODE')
       }
 
-      const pc = pcRef.current
-      if (!pc.localDescription || pc.signalingState === 'stable') {
+      // Validate connection health before attempting to set remote description
+      if (!isConnectionHealthy()) {
         throw new Error('WRONG_CONNECTION_STATE')
       }
 
+      const pc = pcRef.current
       await pc.setRemoteDescription(new RTCSessionDescription(answerDesc))
     } catch (err) {
       console.error('Error accepting answer:', err)
@@ -284,12 +293,12 @@ export default function useFileTransfer() {
         setError('Connection was not initialized properly. Start again by creating a new connection code on the first laptop.')
       } else if (err.message === 'WRONG_CONNECTION_STATE') {
         resetConnection(true)
-        setError('The response could not be applied because the original offer is no longer active. This can happen if the browser suspended the tab or the connection was reset while waiting. Please start again by generating a new offer and response.')
+        setError('The response could not be applied because the original offer is no longer active. This can happen if you switched tabs, the browser suspended the page, or took too long to paste the response. Please start again by generating a new offer and response.')
       } else {
         setError(getDecodeError(err, 'response code'))
       }
     }
-  }, [resetConnection])
+  }, [isConnectionHealthy, resetConnection])
 
   const sendFile = useCallback(async (file) => {
     const dc = dcRef.current
@@ -332,6 +341,27 @@ export default function useFileTransfer() {
 
     sendChunk()
   }, [])
+
+  useEffect(() => {
+    // Monitor tab visibility to detect when page comes back into focus
+    const handleVisibilityChange = () => {
+      if (document.hidden) return
+
+      // Page came back into focus - validate or reset connection
+      const pc = pcRef.current
+      if (pc && offer && !channelOpen) {
+        // We have an offer waiting for an answer, but if connection looks stale, reset it
+        if (pc.signalingState !== 'have-local-offer' || !pc.localDescription) {
+          console.warn('Connection became stale while tab was inactive')
+          resetConnection(true)
+          setError('The connection was lost while the tab was inactive. Please generate a new offer and response to reconnect.')
+        }
+      }
+    }
+
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange)
+  }, [offer, channelOpen, resetConnection])
 
   useEffect(() => {
     return () => {
