@@ -233,6 +233,7 @@ export default function useFileTransfer() {
       const answerDesc = await decode(answerCode)
       await pcRef.current.setRemoteDescription(new RTCSessionDescription(answerDesc))
     } catch (err) {
+      console.error('Error accepting answer:', err)
       setError(getDecodeError(err, 'response code'))
     }
   }, [])
