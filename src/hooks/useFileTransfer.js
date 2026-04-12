@@ -237,15 +237,29 @@ export default function useFileTransfer() {
   const acceptAnswer = useCallback(async (answerCode) => {
     try {
       setError(null)
+      if (!pcRef.current) {
+        throw new Error('NO_PEER_CONNECTION')
+      }
+
       const answerDesc = await decode(answerCode)
       if (answerDesc.type !== 'answer') {
         throw new Error('UNEXPECTED_OFFER_CODE')
       }
-      await pcRef.current.setRemoteDescription(new RTCSessionDescription(answerDesc))
+
+      const pc = pcRef.current
+      if (!pc.localDescription || pc.signalingState === 'stable') {
+        throw new Error('WRONG_CONNECTION_STATE')
+      }
+
+      await pc.setRemoteDescription(new RTCSessionDescription(answerDesc))
     } catch (err) {
       console.error('Error accepting answer:', err)
       if (err.message === 'UNEXPECTED_OFFER_CODE') {
         setError('It looks like you pasted the initial code instead of the response code. Paste the response code sent by the other laptop.')
+      } else if (err.message === 'NO_PEER_CONNECTION') {
+        setError('Connection was not initialized properly. Start again by creating a new connection code on the first laptop.')
+      } else if (err.message === 'WRONG_CONNECTION_STATE') {
+        setError('The response could not be applied because the original offer is no longer active. Please start again by generating a new offer and response.')
       } else {
         setError(getDecodeError(err, 'response code'))
       }
