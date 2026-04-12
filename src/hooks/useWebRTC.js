@@ -3,6 +3,9 @@ import { useRef, useState, useCallback, useEffect } from 'react'
 const ICE_SERVERS = [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
+  { urls: 'stun:stun2.l.google.com:19302' },
+  { urls: 'stun:stun3.l.google.com:19302' },
+  { urls: 'stun:stun4.l.google.com:19302' },
 ]
 
 // Strip SDP to opus + VP8 only — safe because we dynamically find the PTs
@@ -187,8 +190,8 @@ export default function useWebRTC() {
       let resolved = false
       const done = () => { if (!resolved) { resolved = true; resolve() } }
       resolveIceRef.current = done
-      // Need enough time for STUN to discover public IP (required for cross-network calls)
-      setTimeout(done, 5000)
+      // Need enough time for STUN to discover public IP and local network candidates (required for cross-network calls)
+      setTimeout(done, 10000)
     })
 
   const createOffer = useCallback(async (video = true) => {

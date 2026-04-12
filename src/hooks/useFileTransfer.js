@@ -3,6 +3,9 @@ import { useRef, useState, useCallback, useEffect } from 'react'
 const ICE_SERVERS = [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
+  { urls: 'stun:stun2.l.google.com:19302' },
+  { urls: 'stun:stun3.l.google.com:19302' },
+  { urls: 'stun:stun4.l.google.com:19302' },
 ]
 
 const CHUNK_SIZE = 64 * 1024
@@ -168,7 +171,8 @@ export default function useFileTransfer() {
       let resolved = false
       const done = () => { if (!resolved) { resolved = true; resolve() } }
       resolveIceRef.current = done
-      setTimeout(done, 5000)
+      // Longer timeout for local network NAT traversal and candidate gathering
+      setTimeout(done, 10000)
     })
 
   const createOffer = useCallback(async () => {
