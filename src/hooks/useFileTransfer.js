@@ -255,9 +255,12 @@ export default function useFileTransfer() {
 
   const isConnectionHealthy = useCallback(() => {
     const pc = pcRef.current
-    if (!pc || !pc.localDescription) return false
-    // Valid states for accepting an answer: have-local-offer
-    if (pc.signalingState !== 'have-local-offer') return false
+    // Check if connection is actually closed/failed, not just in different signaling state
+    if (!pc || pc.connectionState === 'closed' || pc.connectionState === 'failed') {
+      return false
+    }
+    // For file transfer, we need at least a local description set
+    if (!pc.localDescription) return false
     return true
   }, [])
 
