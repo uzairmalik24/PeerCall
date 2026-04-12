@@ -234,6 +234,29 @@ export default function useFileTransfer() {
     }
   }, [createPeerConnection, setupDataChannel])
 
+  const resetConnection = useCallback((preserveError = false) => {
+    if (dcRef.current) {
+      dcRef.current.close()
+      dcRef.current = null
+    }
+    if (pcRef.current) {
+      pcRef.current.close()
+      pcRef.current = null
+    }
+    setConnectionState('idle')
+    setOffer('')
+    setAnswer('')
+    if (!preserveError) setError(null)
+    setGenerating(false)
+    setSending(null)
+    setReceiving(null)
+    setChannelOpen(false)
+  }, [])
+
+  const disconnect = useCallback(() => {
+    resetConnection(false)
+  }, [resetConnection])
+
   const acceptAnswer = useCallback(async (answerCode) => {
     try {
       setError(null)
@@ -257,14 +280,16 @@ export default function useFileTransfer() {
       if (err.message === 'UNEXPECTED_OFFER_CODE') {
         setError('It looks like you pasted the initial code instead of the response code. Paste the response code sent by the other laptop.')
       } else if (err.message === 'NO_PEER_CONNECTION') {
+        resetConnection(true)
         setError('Connection was not initialized properly. Start again by creating a new connection code on the first laptop.')
       } else if (err.message === 'WRONG_CONNECTION_STATE') {
-        setError('The response could not be applied because the original offer is no longer active. Please start again by generating a new offer and response.')
+        resetConnection(true)
+        setError('The response could not be applied because the original offer is no longer active. This can happen if the browser suspended the tab or the connection was reset while waiting. Please start again by generating a new offer and response.')
       } else {
         setError(getDecodeError(err, 'response code'))
       }
     }
-  }, [])
+  }, [resetConnection])
 
   const sendFile = useCallback(async (file) => {
     const dc = dcRef.current
@@ -306,25 +331,6 @@ export default function useFileTransfer() {
     }
 
     sendChunk()
-  }, [])
-
-  const disconnect = useCallback(() => {
-    if (dcRef.current) {
-      dcRef.current.close()
-      dcRef.current = null
-    }
-    if (pcRef.current) {
-      pcRef.current.close()
-      pcRef.current = null
-    }
-    setConnectionState('idle')
-    setOffer('')
-    setAnswer('')
-    setError(null)
-    setGenerating(false)
-    setSending(null)
-    setReceiving(null)
-    setChannelOpen(false)
   }, [])
 
   useEffect(() => {
