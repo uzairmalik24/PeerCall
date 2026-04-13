@@ -11,8 +11,6 @@ const ICE_SERVERS = [
   // Clockwork STUN servers (alternative option)
   { urls: 'stun:stun.keybrutal.com:3478' },
   { urls: 'stun:stun.stunprotocol.org:3478' },
-  // Coturn STUN-only (no TURN without credentials)
-  { urls: 'stun:stun1.l.google.com:19302' },
   // Public TURN server (US-based)
   {
     urls: ['turn:turnserver.open-relay.com:80', 'turn:openrelay.metered.ca:80'],
