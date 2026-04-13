@@ -14,6 +14,54 @@
   gap: 20px;
 }
 
+/* ─── Connection Panel Wrapper ─── */
+.connection-panel-wrapper {
+  width: 100%;
+  max-width: 520px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* ─── Connection Disclaimer Component ─── */
+.connection-disclaimer {
+  background: linear-gradient(135deg, rgba(100, 200, 255, 0.08) 0%, rgba(100, 180, 255, 0.04) 100%);
+  border: 1px solid rgba(100, 200, 255, 0.15);
+  border-radius: 10px;
+  padding: 14px 16px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.connection-disclaimer h4 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 0 0 8px 0;
+  color: var(--text-bright);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.connection-disclaimer ul {
+  margin: 0;
+  padding: 0 0 0 18px;
+  list-style: disc;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+
+.connection-disclaimer li {
+  margin: 4px 0;
+  color: var(--text-muted);
+}
+
+.connection-disclaimer li strong {
+  color: var(--text-bright);
+  font-weight: 600;
+}
+
 /* ─── Signaling ─── */
 .share-signaling {
   width: 100%;

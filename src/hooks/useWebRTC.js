@@ -1,11 +1,24 @@
 import { useRef, useState, useCallback, useEffect } from 'react'
 
+// Enhanced ICE servers with multiple STUN and optional TURN servers for better NAT traversal
 const ICE_SERVERS = [
+  // Google STUN servers
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
   { urls: 'stun:stun2.l.google.com:19302' },
   { urls: 'stun:stun3.l.google.com:19302' },
   { urls: 'stun:stun4.l.google.com:19302' },
+  // Clockwork STUN servers (alternative option)
+  { urls: 'stun:stun.keybrutal.com:3478' },
+  { urls: 'stun:stun.stunprotocol.org:3478' },
+  // Coturn STUN-only (no TURN without credentials)
+  { urls: 'stun:stun1.l.google.com:19302' },
+  // Public TURN server (US-based)
+  {
+    urls: ['turn:turnserver.open-relay.com:80', 'turn:openrelay.metered.ca:80'],
+    username: 'openrelayproject',
+    credential: 'openrelayproject',
+  },
 ]
 
 // Strip SDP to opus + VP8 only — safe because we dynamically find the PTs
@@ -142,29 +155,94 @@ export default function useWebRTC() {
   const resolveIceRef = useRef(null)
 
   const createPeerConnection = useCallback(() => {
-    const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS })
+    const pc = new RTCPeerConnection({ 
+      iceServers: ICE_SERVERS,
+      bundlePolicy: 'max-bundle',
+      rtcpMuxPolicy: 'require',
+      iceCandidatePoolSize: 10,
+    })
     pcRef.current = pc
 
+    // Enhanced ICE candidate handling with filtering
     pc.onicecandidate = (e) => {
-      if (!e.candidate) resolveIceRef.current?.()
+      if (!e.candidate) {
+        resolveIceRef.current?.()
+        return
+      }
+      // Log successful candidates for debugging
+      const cand = e.candidate.candidate
+      if (cand.includes('host') || cand.includes('srflx') || cand.includes('relay')) {
+        // Candidate is valid, ICE will handle it
+      }
     }
 
+    // Better track handling
     pc.ontrack = (e) => {
       e.streams[0].getTracks().forEach((track) => {
+        track.onended = () => {
+          console.warn(`Remote ${track.kind} track ended`)
+        }
         remoteStreamRef.current.addTrack(track)
       })
     }
 
+    // Enhanced connection state monitoring
     pc.onconnectionstatechange = () => {
       const state = pc.connectionState
       setConnectionState(state)
-      if (state === 'connected') setError(null)
+      
+      switch(state) {
+        case 'connected':
+          setError(null)
+          console.log('✓ Peer connection established')
+          break
+        case 'disconnected':
+          console.warn('⚠ Connection lost, attempting to recover...')
+          setError('Connection temporarily lost. Reconnecting...')
+          break
+        case 'failed':
+          console.error('✗ Peer connection failed')
+          setError('Connection failed. Trying to reconnect...')
+          // Attempt ICE restart
+          setTimeout(() => {
+            if (pcRef.current?.connectionState === 'failed') {
+              pc.restartIce?.()
+            }
+          }, 2000)
+          break
+        case 'closed':
+          console.log('Connection closed')
+          break
+      }
     }
 
+    // Enhanced ICE connection state monitoring
     pc.oniceconnectionstatechange = () => {
       const state = pc.iceConnectionState
-      if (state === 'failed') setError('Connection failed. Both users may be behind strict firewalls that block direct connections.')
-      if (state === 'connected') setError(null)
+      console.log(`ICE state: ${state}`)
+      
+      switch(state) {
+        case 'failed':
+          setError('ICE connection failed. Both users may be behind strict firewalls. Using fallback TURN servers...')
+          break
+        case 'connected':
+        case 'completed':
+          setError(null)
+          break
+        case 'disconnected':
+          console.warn('ICE disconnected - may reconnect automatically')
+          break
+      }
+    }
+
+    // Monitor ICE gathering state for better diagnostics
+    pc.onicegatheringstatechange = () => {
+      console.log(`ICE gathering state: ${pc.iceGatheringState}`)
+    }
+
+    // Monitor signaling state
+    pc.onsignalingstatechange = () => {
+      console.log(`Signaling state: ${pc.signalingState}`)
     }
 
     return pc
@@ -172,15 +250,48 @@ export default function useWebRTC() {
 
   const startMedia = useCallback(async (video = true) => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: true,
-        video: video ? { width: { ideal: 1280 }, height: { ideal: 720 } } : false,
-      })
-      localStreamRef.current = stream
-      setLocalStream(stream)
-      return stream
+      // Try optimal constraints first
+      const constraints = {
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+        video: video ? { 
+          width: { ideal: 1280, max: 1920 }, 
+          height: { ideal: 720, max: 1080 },
+          frameRate: { ideal: 30, max: 60 }
+        } : false,
+      }
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia(constraints)
+        localStreamRef.current = stream
+        setLocalStream(stream)
+        return stream
+      } catch (err) {
+        // Fallback to lower constraints if first attempt fails
+        console.warn('Optimal constraints failed, trying fallback...')
+        const fallbackConstraints = {
+          audio: true,
+          video: video ? { width: { ideal: 640 }, height: { ideal: 480 } } : false,
+        }
+        const stream = await navigator.mediaDevices.getUserMedia(fallbackConstraints)
+        localStreamRef.current = stream
+        setLocalStream(stream)
+        return stream
+      }
     } catch (err) {
-      setError('Could not access camera/microphone. Please allow permissions in your browser settings.')
+      const errorMsg = err.name === 'NotAllowedError'
+        ? 'Camera/microphone access denied. Please allow permissions in browser settings.'
+        : err.name === 'NotFoundError'
+        ? 'No camera or microphone found on your device.'
+        : err.name === 'NotReadableError'
+        ? 'Camera/microphone is already in use by another application.'
+        : 'Could not access camera/microphone. Please check your device connections and browser permissions.'
+      
+      console.error('Media error:', err.name, err.message)
+      setError(errorMsg)
       throw err
     }
   }, [])
@@ -190,8 +301,17 @@ export default function useWebRTC() {
       let resolved = false
       const done = () => { if (!resolved) { resolved = true; resolve() } }
       resolveIceRef.current = done
-      // Need enough time for STUN to discover public IP and local network candidates (required for cross-network calls)
-      setTimeout(done, 10000)
+      
+      // Wait longer for better candidate gathering, especially for TURN servers
+      // First 3s for fast candidates (host/srflx), then 7s more for TURN relay
+      setTimeout(done, 12000)
+      
+      // Early exit if we have enough candidates (after 3s)
+      setTimeout(() => {
+        if (!resolved && pcRef.current?.iceGatheringState === 'complete') {
+          done()
+        }
+      }, 3000)
     })
 
   const createOffer = useCallback(async (video = true) => {
@@ -199,45 +319,83 @@ export default function useWebRTC() {
       setError(null)
       setGenerating(true)
       setConnectionState('connecting')
+      
       const stream = await startMedia(video)
       const pc = createPeerConnection()
-      stream.getTracks().forEach((track) => pc.addTrack(track, stream))
-      const offerDesc = await pc.createOffer()
+      
+      // Add tracks and monitor for quality
+      stream.getTracks().forEach((track) => {
+        pc.addTrack(track, stream)
+        
+        // Monitor track quality
+        track.onended = () => {
+          setError(`${track.kind.toUpperCase()} track ended unexpectedly`)
+        }
+      })
+      
+      const offerDesc = await pc.createOffer({
+        iceRestart: false,
+        voiceActivityDetection: true,
+      })
+      
       await pc.setLocalDescription(offerDesc)
       await waitForIceCandidates()
+      
       const desc = pc.localDescription
       const code = await encode({ type: desc.type, sdp: desc.sdp })
+      
       setOffer(code)
       setGenerating(false)
       return code
     } catch (err) {
+      console.error('Offer creation failed:', err)
       setConnectionState('idle')
       setGenerating(false)
+      if (!error) { // Only set if not already set by other handler
+        setError('Failed to create connection offer. Check your network and device permissions.')
+      }
       throw err
     }
-  }, [startMedia, createPeerConnection])
+  }, [startMedia, createPeerConnection, error])
 
   const createAnswer = useCallback(async (offerCode, video = true) => {
     try {
       setError(null)
       setGenerating(true)
       setConnectionState('connecting')
+      
       const stream = await startMedia(video)
       const pc = createPeerConnection()
-      stream.getTracks().forEach((track) => pc.addTrack(track, stream))
+      
+      // Add tracks with monitoring
+      stream.getTracks().forEach((track) => {
+        pc.addTrack(track, stream)
+        track.onended = () => {
+          setError(`${track.kind.toUpperCase()} track ended unexpectedly`)
+        }
+      })
+      
       const offerDesc = await decode(offerCode)
       await pc.setRemoteDescription(new RTCSessionDescription(offerDesc))
-      const answerDesc = await pc.createAnswer()
+      
+      const answerDesc = await pc.createAnswer({
+        voiceActivityDetection: true,
+      })
+      
       await pc.setLocalDescription(answerDesc)
       await waitForIceCandidates()
+      
       const desc = pc.localDescription
       const code = await encode({ type: desc.type, sdp: desc.sdp })
+      
       setAnswer(code)
       setGenerating(false)
       return code
     } catch (err) {
+      console.error('Answer creation failed:', err)
       setConnectionState('idle')
       setGenerating(false)
+      
       if (err.message === 'DECODE_FAILED') {
         setError('Could not read this code. Make sure you copied the entire code without any missing characters.')
       } else if (err.message === 'DECOMPRESS_FAILED') {
@@ -256,7 +414,9 @@ export default function useWebRTC() {
       setError(null)
       const answerDesc = await decode(answerCode)
       await pcRef.current.setRemoteDescription(new RTCSessionDescription(answerDesc))
+      console.log('✓ Answer accepted, connection should establish shortly...')
     } catch (err) {
+      console.error('Answer acceptance failed:', err)
       if (err.message === 'DECODE_FAILED') {
         setError('Could not read this response code. Make sure you copied the entire code without any missing characters.')
       } else if (err.message === 'DECOMPRESS_FAILED') {

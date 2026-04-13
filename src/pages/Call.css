@@ -5,6 +5,97 @@
   background: var(--bg-deep);
 }
 
+/* ─── Disclaimer Banner ─── */
+.disclaimer-banner {
+  background: linear-gradient(135deg, rgba(255, 152, 0, 0.05) 0%, rgba(255, 193, 7, 0.03) 100%);
+  border-bottom: 1px solid rgba(255, 152, 0, 0.2);
+  padding: 16px 24px;
+  border-top: 3px solid rgba(255, 152, 0, 0.3);
+}
+
+.disclaimer-content {
+  max-width: 1200px;
+  margin: 0 auto;
+  color: var(--text-dim);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.disclaimer-content h4 {
+  margin: 0 0 8px 0;
+  color: var(--text-bright);
+  font-size: 14px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.disclaimer-content p {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+.disclaimer-content ul {
+  margin: 8px 0 8px 20px;
+  padding: 0;
+  list-style: disc;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.disclaimer-content li {
+  margin: 3px 0;
+  line-height: 1.4;
+}
+
+.disclaimer-note {
+  margin-top: 8px !important;
+  font-style: italic;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+/* ─── Connection Disclaimer Component ─── */
+.connection-disclaimer {
+  background: linear-gradient(135deg, rgba(100, 200, 255, 0.08) 0%, rgba(100, 180, 255, 0.04) 100%);
+  border: 1px solid rgba(100, 200, 255, 0.15);
+  border-radius: 10px;
+  padding: 14px 16px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.connection-disclaimer h4 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 0 0 8px 0;
+  color: var(--text-bright);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.connection-disclaimer ul {
+  margin: 0;
+  padding: 0 0 0 18px;
+  list-style: disc;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+
+.connection-disclaimer li {
+  margin: 4px 0;
+  color: var(--text-muted);
+}
+
+.connection-disclaimer li strong {
+  color: var(--text-bright);
+  font-weight: 600;
+}
+
 /* ─── Nav ─── */
 .call-nav {
   display: flex;
@@ -147,8 +238,16 @@
 }
 
 .panel-center .panel {
-  max-width: 480px;
+  max-width: 520px;
   width: 100%;
+}
+
+.connection-panel-wrapper {
+  width: 100%;
+  max-width: 520px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
 
 /* ─── Video (connected) ─── */

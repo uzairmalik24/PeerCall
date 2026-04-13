@@ -1,11 +1,22 @@
 import { useRef, useState, useCallback, useEffect } from 'react'
 
+// Enhanced ICE servers with multiple STUN and optional TURN servers
 const ICE_SERVERS = [
+  // Google STUN servers
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
   { urls: 'stun:stun2.l.google.com:19302' },
   { urls: 'stun:stun3.l.google.com:19302' },
   { urls: 'stun:stun4.l.google.com:19302' },
+  // Clockwork STUN servers
+  { urls: 'stun:stun.keybrutal.com:3478' },
+  { urls: 'stun:stun.stunprotocol.org:3478' },
+  // Public TURN relay
+  {
+    urls: ['turn:turnserver.open-relay.com:80', 'turn:openrelay.metered.ca:80'],
+    username: 'openrelayproject',
+    credential: 'openrelayproject',
+  },
 ]
 
 const CHUNK_SIZE = 64 * 1024
@@ -104,75 +115,134 @@ export default function useFileTransfer() {
   const setupDataChannel = useCallback((dc) => {
     dcRef.current = dc
     dc.binaryType = 'arraybuffer'
+    
+    // Configure buffered amount threshold for better performance
+    dc.bufferedAmountLowThreshold = 256 * 1024 // Resume sending when buffer < 256KB
 
     dc.onopen = () => {
+      console.log('✓ Data channel opened')
       setChannelOpen(true)
       setError(null)
     }
 
     dc.onclose = () => {
+      console.warn('Data channel closed')
       setChannelOpen(false)
     }
 
+    dc.onerror = (event) => {
+      console.error('Data channel error:', event)
+      setError(`Data channel error: ${event.error?.message || 'Unknown error'}. Try reconnecting.`)
+    }
+
     dc.onmessage = (e) => {
-      if (typeof e.data === 'string') {
-        const meta = JSON.parse(e.data)
-        if (meta.type === 'file-start') {
-          receiveMetaRef.current = { name: meta.name, size: meta.size, mimeType: meta.mimeType }
-          receiveBufferRef.current = []
-          setReceiving({ name: meta.name, size: meta.size, received: 0 })
-        } else if (meta.type === 'file-end') {
-          const blob = new Blob(receiveBufferRef.current, {
-            type: receiveMetaRef.current?.mimeType || 'application/octet-stream'
-          })
-          const url = URL.createObjectURL(blob)
-          const fileMeta = receiveMetaRef.current
-          setReceivedFiles((prev) => [
-            ...prev,
-            { name: fileMeta.name, size: fileMeta.size, url, type: fileMeta.mimeType },
-          ])
-          setReceiving(null)
-          receiveBufferRef.current = []
-          receiveMetaRef.current = null
+      try {
+        if (typeof e.data === 'string') {
+          const meta = JSON.parse(e.data)
+          if (meta.type === 'file-start') {
+            receiveMetaRef.current = { name: meta.name, size: meta.size, mimeType: meta.mimeType }
+            receiveBufferRef.current = []
+            setReceiving({ name: meta.name, size: meta.size, received: 0 })
+            console.log(`Receiving: ${meta.name} (${meta.size} bytes)`)
+          } else if (meta.type === 'file-end') {
+            const blob = new Blob(receiveBufferRef.current, {
+              type: receiveMetaRef.current?.mimeType || 'application/octet-stream'
+            })
+            const url = URL.createObjectURL(blob)
+            const fileMeta = receiveMetaRef.current
+            setReceivedFiles((prev) => [
+              ...prev,
+              { name: fileMeta.name, size: fileMeta.size, url, type: fileMeta.mimeType },
+            ])
+            console.log(`✓ Finished receiving: ${fileMeta.name}`)
+            setReceiving(null)
+            receiveBufferRef.current = []
+            receiveMetaRef.current = null
+          }
+        } else {
+          receiveBufferRef.current.push(e.data)
+          const totalReceived = receiveBufferRef.current.reduce((s, b) => s + b.byteLength, 0)
+          setReceiving((prev) => prev ? { ...prev, received: totalReceived } : null)
         }
-      } else {
-        receiveBufferRef.current.push(e.data)
-        const totalReceived = receiveBufferRef.current.reduce((s, b) => s + b.byteLength, 0)
-        setReceiving((prev) => prev ? { ...prev, received: totalReceived } : null)
+      } catch (err) {
+        console.error('Error processing received data:', err)
+        setError('Error receiving data. File transfer may be incomplete.')
       }
     }
   }, [])
 
   const createPeerConnection = useCallback(() => {
-    const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS })
+    const pc = new RTCPeerConnection({ 
+      iceServers: ICE_SERVERS,
+      bundlePolicy: 'max-bundle',
+      rtcpMuxPolicy: 'require',
+    })
     pcRef.current = pc
 
     pc.onicecandidate = (e) => {
-      if (!e.candidate) resolveIceRef.current?.()
+      if (!e.candidate) {
+        console.log('✓ ICE candidate gathering complete')
+        resolveIceRef.current?.()
+      }
     }
 
     pc.onconnectionstatechange = () => {
       const state = pc.connectionState
       setConnectionState(state)
-      if (state === 'connected') setError(null)
+      console.log(`Connection state: ${state}`)
+      
+      switch(state) {
+        case 'connected':
+          setError(null)
+          break
+        case 'failed':
+          setError('Connection failed. Attempting to reconnect with TURN servers...')
+          setTimeout(() => {
+            if (pcRef.current?.connectionState === 'failed') {
+              pc.restartIce?.()
+            }
+          }, 2000)
+          break
+        case 'disconnected':
+          console.warn('Connection disconnected, may reconnect...')
+          break
+      }
     }
 
     pc.oniceconnectionstatechange = () => {
       const state = pc.iceConnectionState
-      if (state === 'failed') setError('Connection failed. Both users may be behind strict firewalls that block direct connections.')
-      if (state === 'connected') setError(null)
+      console.log(`ICE connection state: ${state}`)
+      
+      if (state === 'failed') {
+        setError('Network connection failed. Both users may be behind strict firewalls. Using fallback TURN servers...')
+      } else if (state === 'connected' || state === 'completed') {
+        setError(null)
+      }
+    }
+
+    pc.ondatachannel = (event) => {
+      console.log('Received data channel:', event.channel.label)
+      setupDataChannel(event.channel)
     }
 
     return pc
-  }, [])
+  }, [setupDataChannel])
 
   const waitForIce = () =>
     new Promise((resolve) => {
       let resolved = false
       const done = () => { if (!resolved) { resolved = true; resolve() } }
       resolveIceRef.current = done
-      // Longer timeout for local network NAT traversal and candidate gathering
-      setTimeout(done, 10000)
+      
+      // Longer timeout for better candidate gathering with TURN servers
+      setTimeout(done, 12000)
+      
+      // Early exit if gathering is complete
+      setTimeout(() => {
+        if (!resolved && pcRef.current?.iceGatheringState === 'complete') {
+          done()
+        }
+      }, 3000)
     })
 
   const createOffer = useCallback(async () => {
@@ -180,22 +250,33 @@ export default function useFileTransfer() {
       setError(null)
       setGenerating(true)
       setConnectionState('connecting')
+      
       const pc = createPeerConnection()
-      const dc = pc.createDataChannel('files', { ordered: true })
+      const dc = pc.createDataChannel('files', { 
+        ordered: true,
+        maxPacketLifeTime: 0, // Reliable delivery for files
+      })
       setupDataChannel(dc)
 
-      const offerDesc = await pc.createOffer()
+      const offerDesc = await pc.createOffer({
+        iceRestart: false,
+      })
+      
       await pc.setLocalDescription(offerDesc)
       await waitForIce()
 
       const desc = pc.localDescription
       const code = await encode({ type: desc.type, sdp: desc.sdp })
+      
       setOffer(code)
       setGenerating(false)
+      console.log('✓ File transfer offer created')
       return code
     } catch (err) {
+      console.error('File transfer offer creation failed:', err)
       setConnectionState('idle')
       setGenerating(false)
+      setError('Failed to create file transfer connection. Please try again.')
       throw err
     }
   }, [createPeerConnection, setupDataChannel])
@@ -205,8 +286,8 @@ export default function useFileTransfer() {
       setError(null)
       setGenerating(true)
       setConnectionState('connecting')
+      
       const pc = createPeerConnection()
-
       pc.ondatachannel = (e) => {
         setupDataChannel(e.channel)
       }
@@ -215,6 +296,7 @@ export default function useFileTransfer() {
       if (offerDesc.type !== 'offer') {
         throw new Error('UNEXPECTED_ANSWER_CODE')
       }
+      
       await pc.setRemoteDescription(new RTCSessionDescription(offerDesc))
 
       const answerDesc = await pc.createAnswer()
@@ -223,12 +305,16 @@ export default function useFileTransfer() {
 
       const desc = pc.localDescription
       const code = await encode({ type: desc.type, sdp: desc.sdp })
+      
       setAnswer(code)
       setGenerating(false)
+      console.log('✓ File transfer answer created')
       return code
     } catch (err) {
+      console.error('File transfer answer creation failed:', err)
       setConnectionState('idle')
       setGenerating(false)
+      
       if (err.message === 'UNEXPECTED_ANSWER_CODE') {
         setError('It looks like you pasted the response code instead of the original connection code. Paste the first code shared by the other laptop.')
       } else {
@@ -310,43 +396,69 @@ export default function useFileTransfer() {
   const sendFile = useCallback(async (file) => {
     const dc = dcRef.current
     if (!dc || dc.readyState !== 'open') {
-      setError('Not connected. Establish connection first.')
+      const errorMsg = 'Not connected. Establish connection first.'
+      setError(errorMsg)
+      console.error(errorMsg)
       return
     }
 
-    dc.send(JSON.stringify({
-      type: 'file-start',
-      name: file.name,
-      size: file.size,
-      mimeType: file.type || 'application/octet-stream',
-    }))
+    try {
+      dc.send(JSON.stringify({
+        type: 'file-start',
+        name: file.name,
+        size: file.size,
+        mimeType: file.type || 'application/octet-stream',
+      }))
 
-    setSending({ name: file.name, size: file.size, sent: 0 })
+      setSending({ name: file.name, size: file.size, sent: 0 })
+      console.log(`Sending file: ${file.name}`)
 
-    const buffer = await file.arrayBuffer()
-    let offset = 0
+      const buffer = await file.arrayBuffer()
+      let offset = 0
+      let retries = 0
+      const maxRetries = 3
 
-    const sendChunk = () => {
-      while (offset < buffer.byteLength) {
-        if (dc.bufferedAmount > CHUNK_SIZE * 8) {
-          dc.onbufferedamountlow = () => {
-            dc.onbufferedamountlow = null
-            sendChunk()
+      const sendChunk = () => {
+        while (offset < buffer.byteLength) {
+          if (dc.bufferedAmount > CHUNK_SIZE * 8) {
+            console.log(`Buffer full (${dc.bufferedAmount} bytes), waiting...`)
+            dc.onbufferedamountlow = () => {
+              dc.onbufferedamountlow = null
+              sendChunk()
+            }
+            dc.bufferedAmountLowThreshold = CHUNK_SIZE * 2
+            return
           }
-          dc.bufferedAmountLowThreshold = CHUNK_SIZE * 2
-          return
+          
+          const chunk = buffer.slice(offset, offset + CHUNK_SIZE)
+          
+          try {
+            dc.send(chunk)
+            offset += chunk.byteLength
+            retries = 0 // Reset retry counter on success
+            setSending({ name: file.name, size: file.size, sent: offset })
+          } catch (err) {
+            if (retries < maxRetries && err.message.includes('buffered')) {
+              retries++
+              console.warn(`Send error (retry ${retries}/${maxRetries}):`, err.message)
+              setTimeout(sendChunk, 100 * retries)
+              return
+            }
+            throw err
+          }
         }
-        const chunk = buffer.slice(offset, offset + CHUNK_SIZE)
-        dc.send(chunk)
-        offset += chunk.byteLength
-        setSending({ name: file.name, size: file.size, sent: offset })
+
+        dc.send(JSON.stringify({ type: 'file-end' }))
+        console.log(`✓ Finished sending: ${file.name}`)
+        setSending(null)
       }
 
-      dc.send(JSON.stringify({ type: 'file-end' }))
+      sendChunk()
+    } catch (err) {
+      console.error('File send error:', err)
       setSending(null)
+      setError(`Failed to send file: ${err.message}. Connection may have been interrupted.`)
     }
-
-    sendChunk()
   }, [])
 
   useEffect(() => {

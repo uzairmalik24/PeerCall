@@ -22,6 +22,7 @@ import {
 } from 'lucide-react'
 import useFileTransfer from '../hooks/useFileTransfer'
 import Logo from '../components/Logo'
+import ConnectionPanelWrapper from '../components/ConnectionPanelWrapper'
 import './Share.css'
 
 function formatSize(bytes) {
@@ -288,169 +289,177 @@ export default function Share() {
           {role && !channelOpen && (
             <div className="share-signaling">
               {generating && !offer && !answer && (
-                <div className="panel" ref={panelRef}>
-                  <div className="generating-state">
-                    <Loader2 size={20} className="spin" />
-                    <div>
-                      <h3>Generating connection code...</h3>
-                      <p>This will be much shorter than a call code — no media needed.</p>
+                <ConnectionPanelWrapper context="generating">
+                  <div className="panel" ref={panelRef}>
+                    <div className="generating-state">
+                      <Loader2 size={20} className="spin" />
+                      <div>
+                        <h3>Generating connection code...</h3>
+                        <p>This will be much shorter than a call code — no media needed.</p>
+                      </div>
                     </div>
                   </div>
-                </div>
+                </ConnectionPanelWrapper>
               )}
 
               {role === 'sender' && offer && (
-                <div className="panel" ref={panelRef}>
-                  <div className="panel-step">
-                    <span className="step-badge">Step 1 of 2</span>
-                    <h3>Send This Code to the Other Person</h3>
-                    <p>
-                      Copy the code below and send it via any messaging app.
-                      They need the <strong>entire code</strong> — do not edit
-                      or shorten it.
+                <ConnectionPanelWrapper context="sender">
+                  <div className="panel" ref={panelRef}>
+                    <div className="panel-step">
+                      <span className="step-badge">Step 1 of 2</span>
+                      <h3>Send This Code to the Other Person</h3>
+                      <p>
+                        Copy the code below and send it via any messaging app.
+                        They need the <strong>entire code</strong> — do not edit
+                        or shorten it.
+                      </p>
+                    </div>
+                    <div className="code-area">
+                      <textarea
+                        readOnly
+                        value={offer}
+                        rows={3}
+                        onClick={(e) => e.target.select()}
+                      />
+                      <div className="code-actions">
+                        <span className="code-len">{offer.length} chars</span>
+                        <button
+                          className="btn btn-primary"
+                          onClick={() => copyToClipboard(offer)}
+                        >
+                          {copied ? <Check size={16} /> : <Copy size={16} />}
+                          {copied ? 'Copied!' : 'Copy Code'}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="panel-divider" />
+
+                    <div className="panel-step">
+                      <span className="step-badge">Step 2 of 2</span>
+                      <h3>Paste Their Response Code Here</h3>
+                      <p>
+                        The other person will generate a <strong>different
+                        code</strong> after pasting yours. Ask them to send that
+                        response code back and paste it below.
+                      </p>
+                    </div>
+                    <div className="code-area">
+                      <textarea
+                        placeholder="Paste the response code you received..."
+                        value={peerCode}
+                        onChange={(e) => {
+                          setPeerCode(e.target.value)
+                          setClipboardError(null)
+                        }}
+                        rows={3}
+                      />
+                      <div className="code-actions">
+                        <button
+                          className="btn btn-ghost btn-sm"
+                          onClick={pasteFromClipboard}
+                          type="button"
+                        >
+                          Paste from clipboard
+                        </button>
+                        <button
+                          className="btn btn-primary"
+                          onClick={handleSubmitAnswer}
+                          disabled={!peerCode.trim()}
+                        >
+                          <ArrowRight size={16} />
+                          Connect
+                        </button>
+                      </div>
+                    </div>
+                    <p className="panel-tip">
+                      Make sure you paste the <strong>response</strong> code, not
+                      your own code. The two codes are different.
                     </p>
                   </div>
-                  <div className="code-area">
-                    <textarea
-                      readOnly
-                      value={offer}
-                      rows={3}
-                      onClick={(e) => e.target.select()}
-                    />
-                    <div className="code-actions">
-                      <span className="code-len">{offer.length} chars</span>
-                      <button
-                        className="btn btn-primary"
-                        onClick={() => copyToClipboard(offer)}
-                      >
-                        {copied ? <Check size={16} /> : <Copy size={16} />}
-                        {copied ? 'Copied!' : 'Copy Code'}
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="panel-divider" />
-
-                  <div className="panel-step">
-                    <span className="step-badge">Step 2 of 2</span>
-                    <h3>Paste Their Response Code Here</h3>
-                    <p>
-                      The other person will generate a <strong>different
-                      code</strong> after pasting yours. Ask them to send that
-                      response code back and paste it below.
-                    </p>
-                  </div>
-                  <div className="code-area">
-                    <textarea
-                      placeholder="Paste the response code you received..."
-                      value={peerCode}
-                      onChange={(e) => {
-                        setPeerCode(e.target.value)
-                        setClipboardError(null)
-                      }}
-                      rows={3}
-                    />
-                    <div className="code-actions">
-                      <button
-                        className="btn btn-ghost btn-sm"
-                        onClick={pasteFromClipboard}
-                        type="button"
-                      >
-                        Paste from clipboard
-                      </button>
-                      <button
-                        className="btn btn-primary"
-                        onClick={handleSubmitAnswer}
-                        disabled={!peerCode.trim()}
-                      >
-                        <ArrowRight size={16} />
-                        Connect
-                      </button>
-                    </div>
-                  </div>
-                  <p className="panel-tip">
-                    Make sure you paste the <strong>response</strong> code, not
-                    your own code. The two codes are different.
-                  </p>
-                </div>
+                </ConnectionPanelWrapper>
               )}
 
               {role === 'receiver' && !answer && !generating && (
-                <div className="panel" ref={panelRef}>
-                  <div className="panel-step">
-                    <h3>Paste the Code You Received</h3>
-                    <p>
-                      Someone shared a connection code with you. Paste the
-                      <strong> entire code</strong> below — don't edit or
-                      shorten it. After clicking "Generate Response", a new code
-                      will appear that you need to send back to them.
-                    </p>
-                  </div>
-                  <div className="code-area">
-                    <textarea
-                      placeholder="Paste the code you received here..."
-                      value={peerCode}
-                      onChange={(e) => {
-                        setPeerCode(e.target.value)
-                        setClipboardError(null)
-                      }}
-                      rows={3}
-                    />
-                    <div className="code-actions">
-                      <button
-                        className="btn btn-ghost btn-sm"
-                        onClick={pasteFromClipboard}
-                        type="button"
-                      >
-                        Paste from clipboard
-                      </button>
-                      <button
-                        className="btn btn-primary"
-                        onClick={handleSubmitOffer}
-                        disabled={!peerCode.trim()}
-                      >
-                        <Clipboard size={16} />
-                        Generate Response
-                      </button>
+                <ConnectionPanelWrapper context="receiver">
+                  <div className="panel" ref={panelRef}>
+                    <div className="panel-step">
+                      <h3>Paste the Code You Received</h3>
+                      <p>
+                        Someone shared a connection code with you. Paste the
+                        <strong> entire code</strong> below — don't edit or
+                        shorten it. After clicking "Generate Response", a new code
+                        will appear that you need to send back to them.
+                      </p>
+                    </div>
+                    <div className="code-area">
+                      <textarea
+                        placeholder="Paste the code you received here..."
+                        value={peerCode}
+                        onChange={(e) => {
+                          setPeerCode(e.target.value)
+                          setClipboardError(null)
+                        }}
+                        rows={3}
+                      />
+                      <div className="code-actions">
+                        <button
+                          className="btn btn-ghost btn-sm"
+                          onClick={pasteFromClipboard}
+                          type="button"
+                        >
+                          Paste from clipboard
+                        </button>
+                        <button
+                          className="btn btn-primary"
+                          onClick={handleSubmitOffer}
+                          disabled={!peerCode.trim()}
+                        >
+                          <Clipboard size={16} />
+                          Generate Response
+                        </button>
+                      </div>
                     </div>
                   </div>
-                </div>
+                </ConnectionPanelWrapper>
               )}
 
               {role === 'receiver' && answer && (
-                <div className="panel" ref={panelRef}>
-                  <div className="panel-step">
-                    <h3>Send This Response Code Back</h3>
-                    <p>
-                      Copy this code and send it back to the person who shared
-                      the first code with you. They'll paste it on their end to
-                      complete the connection. Copy the <strong>entire
-                      code</strong>.
-                    </p>
-                  </div>
-                  <div className="code-area">
-                    <textarea
-                      readOnly
-                      value={answer}
-                      rows={3}
-                      onClick={(e) => e.target.select()}
-                    />
-                    <div className="code-actions">
-                      <span className="code-len">{answer.length} chars</span>
-                      <button
-                        className="btn btn-primary"
-                        onClick={() => copyToClipboard(answer)}
-                      >
-                        {copied ? <Check size={16} /> : <Copy size={16} />}
-                        {copied ? 'Copied!' : 'Copy Response'}
-                      </button>
+                <ConnectionPanelWrapper context="receiver">
+                  <div className="panel" ref={panelRef}>
+                    <div className="panel-step">
+                      <h3>Send This Response Code Back</h3>
+                      <p>
+                        Copy this code and send it back to the person who shared
+                        the first code with you. They'll paste it on their end to
+                        complete the connection. Copy the <strong>entire
+                        code</strong>.
+                      </p>
+                    </div>
+                    <div className="code-area">
+                      <textarea
+                        readOnly
+                        value={answer}
+                        rows={3}
+                        onClick={(e) => e.target.select()}
+                      />
+                      <div className="code-actions">
+                        <span className="code-len">{answer.length} chars</span>
+                        <button
+                          className="btn btn-primary"
+                          onClick={() => copyToClipboard(answer)}
+                        >
+                          {copied ? <Check size={16} /> : <Copy size={16} />}
+                          {copied ? 'Copied!' : 'Copy Response'}
+                        </button>
+                      </div>
+                    </div>
+                    <div className="waiting-hint">
+                      <Loader2 size={14} className="spin" />
+                      <span>Waiting for them to enter your code...</span>
                     </div>
                   </div>
-                  <div className="waiting-hint">
-                    <Loader2 size={14} className="spin" />
-                    <span>Waiting for them to enter your code...</span>
-                  </div>
-                </div>
+                </ConnectionPanelWrapper>
               )}
             </div>
           )}
@@ -458,27 +467,29 @@ export default function Share() {
           {/* Initial: choose role */}
           {!role && !channelOpen && (
             <div className="panel-center">
-              <div className="panel" ref={panelRef}>
-                <div className="panel-header">
-                  <h2>Share Files</h2>
-                  <p>
-                    Send files directly between browsers with zero quality loss.
-                    No upload limits, no compression, no server storage. Files
-                    transfer bit-for-bit identical over a dedicated P2P data
-                    channel.
-                  </p>
+              <ConnectionPanelWrapper context="general">
+                <div className="panel" ref={panelRef}>
+                  <div className="panel-header">
+                    <h2>Share Files</h2>
+                    <p>
+                      Send files directly between browsers with zero quality loss.
+                      No upload limits, no compression, no server storage. Files
+                      transfer bit-for-bit identical over a dedicated P2P data
+                      channel.
+                    </p>
+                  </div>
+                  <div className="panel-buttons">
+                    <button className="btn btn-primary btn-lg" onClick={handleCreateOffer}>
+                      <Link2 size={18} />
+                      Create Connection
+                    </button>
+                    <button className="btn btn-ghost btn-lg" onClick={handleJoinShare}>
+                      <UserPlus size={18} />
+                      Join Connection
+                    </button>
+                  </div>
                 </div>
-                <div className="panel-buttons">
-                  <button className="btn btn-primary btn-lg" onClick={handleCreateOffer}>
-                    <Link2 size={18} />
-                    Create Connection
-                  </button>
-                  <button className="btn btn-ghost btn-lg" onClick={handleJoinShare}>
-                    <UserPlus size={18} />
-                    Join Connection
-                  </button>
-                </div>
-              </div>
+              </ConnectionPanelWrapper>
             </div>
           )}
         </div>
