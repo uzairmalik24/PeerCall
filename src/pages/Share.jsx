@@ -1,48 +1,466 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
-import { Link } from 'react-router-dom'
-import { Helmet } from 'react-helmet-async'
-import { gsap } from 'gsap'
-import {
-  ArrowLeft,
-  ArrowRight,
-  Copy,
-  Check,
-  Link2,
-  UserPlus,
-  Clipboard,
-  Loader2,
-  Upload,
-  Download,
-  File,
-  Image,
-  Film,
-  Music,
-  FileText,
-  X,
-} from 'lucide-react'
-import useFileTransfer from '../hooks/useFileTransfer'
-import Logo from '../components/Logo'
-import ConnectionPanelWrapper from '../components/ConnectionPanelWrapper'
-import './Share.css'
+import { useRef, useState, useCallback, useEffect } from 'react'
 
-function formatSize(bytes) {
-  if (bytes < 1024) return bytes + ' B'
-  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
-  if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
-  return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GB'
+// Reliable STUN servers only — public TURN credentials are almost always broken
+const ICE_SERVERS = [
+  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:stun1.l.google.com:19302' },
+  { urls: 'stun:stun2.l.google.com:19302' },
+  { urls: 'stun:stun3.l.google.com:19302' },
+  { urls: 'stun:stun4.l.google.com:19302' },
+  { urls: 'stun:stun.stunprotocol.org:3478' },
+]
+
+const CHUNK_SIZE = 64 * 1024
+
+function toBase64Url(str) {
+  return btoa(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
 }
 
-function fileIcon(type) {
-  if (!type) return File
-  if (type.startsWith('image/')) return Image
-  if (type.startsWith('video/')) return Film
-  if (type.startsWith('audio/')) return Music
-  if (type.startsWith('text/') || type.includes('pdf') || type.includes('document')) return FileText
-  return File
+function fromBase64Url(str) {
+  let b64 = str.replace(/-/g, '+').replace(/_/g, '/')
+  while (b64.length % 4) b64 += '='
+  return atob(b64)
 }
 
-export default function Share() {
-  const {
+async function encode(desc) {
+  const raw = (desc.type === 'offer' ? 'O' : 'A') + desc.sdp
+  const blob = new Blob([raw])
+  const cs = new CompressionStream('deflate')
+  const compressed = blob.stream().pipeThrough(cs)
+  const buf = await new Response(compressed).arrayBuffer()
+  const bytes = new Uint8Array(buf)
+  let bin = ''
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i])
+  return toBase64Url(bin)
+}
+
+async function decode(str) {
+  const cleaned = str.trim().replace(/[\s\u0000-\u001F\u007F-\u009F\u200B-\u200F\u2028-\u202F\u205F-\u206F\uFEFF]/g, '')
+
+  let bin
+  try {
+    bin = fromBase64Url(cleaned)
+  } catch {
+    try {
+      bin = atob(cleaned)
+    } catch {
+      throw new Error('DECODE_FAILED')
+    }
+  }
+
+  const bytes = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+  const blob = new Blob([bytes])
+  const ds = new DecompressionStream('deflate')
+  const decompressed = blob.stream().pipeThrough(ds)
+
+  let text
+  try {
+    text = await new Response(decompressed).text()
+  } catch {
+    throw new Error('DECOMPRESS_FAILED')
+  }
+
+  if (text[0] !== 'O' && text[0] !== 'A') {
+    throw new Error('INVALID_FORMAT')
+  }
+
+  return {
+    type: text[0] === 'O' ? 'offer' : 'answer',
+    sdp: text.slice(1),
+  }
+}
+
+function getDecodeError(err, context) {
+  if (err.message === 'DECODE_FAILED') {
+    return `Could not read this ${context}. Make sure you copied the entire code without any missing characters.`
+  }
+  if (err.message === 'DECOMPRESS_FAILED') {
+    return `${context.charAt(0).toUpperCase() + context.slice(1)} is corrupted. It may have been truncated during copy-paste. Try copying it again.`
+  }
+  if (err.message === 'INVALID_FORMAT') {
+    return `This doesn't look like a valid PeerCall ${context}. Make sure you're pasting the correct code.`
+  }
+  return `Could not process the ${context}. Make sure the complete code was copied.`
+}
+
+export default function useFileTransfer() {
+  const pcRef = useRef(null)
+  const dcRef = useRef(null)
+  const resolveIceRef = useRef(null)
+
+  const [connectionState, setConnectionState] = useState('idle')
+  const [offer, setOffer] = useState('')
+  const [answer, setAnswer] = useState('')
+  const [error, setError] = useState(null)
+  const [generating, setGenerating] = useState(false)
+
+  const [sending, setSending] = useState(null)
+  const [receiving, setReceiving] = useState(null)
+  const [receivedFiles, setReceivedFiles] = useState([])
+  const [channelOpen, setChannelOpen] = useState(false)
+
+  const receiveBufferRef = useRef([])
+  const receiveMetaRef = useRef(null)
+
+  const setupDataChannel = useCallback((dc) => {
+    dcRef.current = dc
+    dc.binaryType = 'arraybuffer'
+    dc.bufferedAmountLowThreshold = 256 * 1024
+
+    dc.onopen = () => {
+      console.log('✓ Data channel opened')
+      setChannelOpen(true)
+      setError(null)
+    }
+
+    dc.onclose = () => {
+      console.warn('Data channel closed')
+      setChannelOpen(false)
+    }
+
+    dc.onerror = (event) => {
+      console.error('Data channel error:', event)
+      setError(`Data channel error: ${event.error?.message || 'Unknown error'}. Try reconnecting.`)
+    }
+
+    dc.onmessage = (e) => {
+      try {
+        if (typeof e.data === 'string') {
+          const meta = JSON.parse(e.data)
+          if (meta.type === 'file-start') {
+            receiveMetaRef.current = { name: meta.name, size: meta.size, mimeType: meta.mimeType }
+            receiveBufferRef.current = []
+            setReceiving({ name: meta.name, size: meta.size, received: 0 })
+            console.log(`Receiving: ${meta.name} (${meta.size} bytes)`)
+          } else if (meta.type === 'file-end') {
+            const blob = new Blob(receiveBufferRef.current, {
+              type: receiveMetaRef.current?.mimeType || 'application/octet-stream'
+            })
+            const url = URL.createObjectURL(blob)
+            const fileMeta = receiveMetaRef.current
+            setReceivedFiles((prev) => [
+              ...prev,
+              { name: fileMeta.name, size: fileMeta.size, url, type: fileMeta.mimeType },
+            ])
+            console.log(`✓ Finished receiving: ${fileMeta.name}`)
+            setReceiving(null)
+            receiveBufferRef.current = []
+            receiveMetaRef.current = null
+          }
+        } else {
+          receiveBufferRef.current.push(e.data)
+          const totalReceived = receiveBufferRef.current.reduce((s, b) => s + b.byteLength, 0)
+          setReceiving((prev) => prev ? { ...prev, received: totalReceived } : null)
+        }
+      } catch (err) {
+        console.error('Error processing received data:', err)
+        setError('Error receiving data. File transfer may be incomplete.')
+      }
+    }
+  }, [])
+
+  const createPeerConnection = useCallback(() => {
+    const pc = new RTCPeerConnection({
+      iceServers: ICE_SERVERS,
+      bundlePolicy: 'max-bundle',
+      rtcpMuxPolicy: 'require',
+    })
+    pcRef.current = pc
+
+    pc.onicecandidate = (e) => {
+      if (!e.candidate) {
+        console.log('✓ ICE candidate gathering complete')
+        resolveIceRef.current?.()
+      }
+    }
+
+    pc.onconnectionstatechange = () => {
+      const state = pc.connectionState
+      setConnectionState(state)
+      console.log(`Connection state: ${state}`)
+
+      if (state === 'connected') {
+        setError(null)
+      } else if (state === 'failed') {
+        // Don't show misleading TURN message — just report failure clearly
+        setError('Connection failed. Both peers may be behind strict NAT/firewalls. Try on the same network or use a VPN.')
+      }
+    }
+
+    pc.oniceconnectionstatechange = () => {
+      const state = pc.iceConnectionState
+      console.log(`ICE connection state: ${state}`)
+      if (state === 'connected' || state === 'completed') {
+        setError(null)
+      }
+    }
+
+    // NOTE: ondatachannel is intentionally NOT set here.
+    // createOffer sets up the channel directly via pc.createDataChannel().
+    // createAnswer sets ondatachannel after calling this function,
+    // so setting it here would be overwritten anyway and could cause
+    // a race condition where setupDataChannel is called twice.
+
+    return pc
+  }, [setupDataChannel])
+
+  const waitForIce = () =>
+    new Promise((resolve) => {
+      let resolved = false
+      const done = () => { if (!resolved) { resolved = true; resolve() } }
+      resolveIceRef.current = done
+
+      // Check if already complete (can happen when peers are on same network)
+      if (pcRef.current?.iceGatheringState === 'complete') {
+        done()
+        return
+      }
+
+      // Timeout: 8s is enough for STUN-only; TURN needs more but we removed bad TURN
+      setTimeout(done, 8000)
+    })
+
+  const createOffer = useCallback(async () => {
+    try {
+      setError(null)
+      setGenerating(true)
+      setConnectionState('connecting')
+
+      const pc = createPeerConnection()
+
+      // Sender creates the data channel
+      const dc = pc.createDataChannel('files', {
+        ordered: true,
+        // Do NOT set maxPacketLifeTime — 0 means "expire immediately" and breaks reliability.
+        // Omitting it gives you the default reliable (TCP-like) mode.
+      })
+      setupDataChannel(dc)
+
+      const offerDesc = await pc.createOffer()
+      await pc.setLocalDescription(offerDesc)
+      await waitForIce()
+
+      const desc = pc.localDescription
+      const code = await encode({ type: desc.type, sdp: desc.sdp })
+
+      setOffer(code)
+      setGenerating(false)
+      console.log('✓ File transfer offer created')
+      return code
+    } catch (err) {
+      console.error('File transfer offer creation failed:', err)
+      setConnectionState('idle')
+      setGenerating(false)
+      setError('Failed to create file transfer connection. Please try again.')
+      throw err
+    }
+  }, [createPeerConnection, setupDataChannel])
+
+  const createAnswer = useCallback(async (offerCode) => {
+    try {
+      setError(null)
+      setGenerating(true)
+      setConnectionState('connecting')
+
+      const pc = createPeerConnection()
+
+      // Receiver waits for the data channel created by the sender
+      // Set ondatachannel here (not in createPeerConnection) to avoid duplication
+      pc.ondatachannel = (e) => {
+        console.log('Received data channel:', e.channel.label)
+        setupDataChannel(e.channel)
+      }
+
+      const offerDesc = await decode(offerCode)
+      if (offerDesc.type !== 'offer') {
+        throw new Error('UNEXPECTED_ANSWER_CODE')
+      }
+
+      await pc.setRemoteDescription(new RTCSessionDescription(offerDesc))
+
+      const answerDesc = await pc.createAnswer()
+      await pc.setLocalDescription(answerDesc)
+      await waitForIce()
+
+      const desc = pc.localDescription
+      const code = await encode({ type: desc.type, sdp: desc.sdp })
+
+      setAnswer(code)
+      setGenerating(false)
+      console.log('✓ File transfer answer created')
+      return code
+    } catch (err) {
+      console.error('File transfer answer creation failed:', err)
+      setConnectionState('idle')
+      setGenerating(false)
+
+      if (err.message === 'UNEXPECTED_ANSWER_CODE') {
+        setError('It looks like you pasted the response code instead of the original connection code. Paste the first code shared by the other laptop.')
+      } else {
+        setError(getDecodeError(err, 'code'))
+      }
+      throw err
+    }
+  }, [createPeerConnection, setupDataChannel])
+
+  const resetConnection = useCallback((preserveError = false) => {
+    if (dcRef.current) {
+      dcRef.current.close()
+      dcRef.current = null
+    }
+    if (pcRef.current) {
+      pcRef.current.close()
+      pcRef.current = null
+    }
+    setConnectionState('idle')
+    setOffer('')
+    setAnswer('')
+    if (!preserveError) setError(null)
+    setGenerating(false)
+    setSending(null)
+    setReceiving(null)
+    setChannelOpen(false)
+  }, [])
+
+  const isConnectionHealthy = useCallback(() => {
+    const pc = pcRef.current
+    if (!pc || pc.connectionState === 'closed' || pc.connectionState === 'failed') {
+      return false
+    }
+    if (!pc.localDescription) return false
+    return true
+  }, [])
+
+  const disconnect = useCallback(() => {
+    resetConnection(false)
+  }, [resetConnection])
+
+  const acceptAnswer = useCallback(async (answerCode) => {
+    try {
+      setError(null)
+      if (!pcRef.current) {
+        throw new Error('NO_PEER_CONNECTION')
+      }
+
+      const answerDesc = await decode(answerCode)
+      if (answerDesc.type !== 'answer') {
+        throw new Error('UNEXPECTED_OFFER_CODE')
+      }
+
+      if (!isConnectionHealthy()) {
+        throw new Error('WRONG_CONNECTION_STATE')
+      }
+
+      const pc = pcRef.current
+      await pc.setRemoteDescription(new RTCSessionDescription(answerDesc))
+    } catch (err) {
+      console.error('Error accepting answer:', err)
+      if (err.message === 'UNEXPECTED_OFFER_CODE') {
+        setError('It looks like you pasted the initial code instead of the response code. Paste the response code sent by the other laptop.')
+      } else if (err.message === 'NO_PEER_CONNECTION') {
+        resetConnection(true)
+        setError('Connection was not initialized properly. Start again by creating a new connection code on the first laptop.')
+      } else if (err.message === 'WRONG_CONNECTION_STATE') {
+        resetConnection(true)
+        setError('The response could not be applied because the original offer is no longer active. This can happen if you switched tabs, the browser suspended the page, or took too long to paste the response. Please start again by generating a new offer and response.')
+      } else {
+        setError(getDecodeError(err, 'response code'))
+      }
+    }
+  }, [isConnectionHealthy, resetConnection])
+
+  const sendFile = useCallback(async (file) => {
+    const dc = dcRef.current
+    if (!dc || dc.readyState !== 'open') {
+      setError('Not connected. Establish connection first.')
+      return
+    }
+
+    try {
+      dc.send(JSON.stringify({
+        type: 'file-start',
+        name: file.name,
+        size: file.size,
+        mimeType: file.type || 'application/octet-stream',
+      }))
+
+      setSending({ name: file.name, size: file.size, sent: 0 })
+      console.log(`Sending file: ${file.name}`)
+
+      const buffer = await file.arrayBuffer()
+      let offset = 0
+      let retries = 0
+      const maxRetries = 3
+
+      const sendChunk = () => {
+        while (offset < buffer.byteLength) {
+          if (dc.bufferedAmount > CHUNK_SIZE * 8) {
+            console.log(`Buffer full (${dc.bufferedAmount} bytes), waiting...`)
+            dc.onbufferedamountlow = () => {
+              dc.onbufferedamountlow = null
+              sendChunk()
+            }
+            dc.bufferedAmountLowThreshold = CHUNK_SIZE * 2
+            return
+          }
+
+          const chunk = buffer.slice(offset, offset + CHUNK_SIZE)
+
+          try {
+            dc.send(chunk)
+            offset += chunk.byteLength
+            retries = 0
+            setSending({ name: file.name, size: file.size, sent: offset })
+          } catch (err) {
+            if (retries < maxRetries && err.message.includes('buffered')) {
+              retries++
+              console.warn(`Send error (retry ${retries}/${maxRetries}):`, err.message)
+              setTimeout(sendChunk, 100 * retries)
+              return
+            }
+            throw err
+          }
+        }
+
+        dc.send(JSON.stringify({ type: 'file-end' }))
+        console.log(`✓ Finished sending: ${file.name}`)
+        setSending(null)
+      }
+
+      sendChunk()
+    } catch (err) {
+      console.error('File send error:', err)
+      setSending(null)
+      setError(`Failed to send file: ${err.message}. Connection may have been interrupted.`)
+    }
+  }, [])
+
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.hidden) return
+      const pc = pcRef.current
+      if (pc && offer && !channelOpen) {
+        if (pc.signalingState !== 'have-local-offer' || !pc.localDescription) {
+          console.warn('Connection became stale while tab was inactive')
+          resetConnection(true)
+          setError('The connection was lost while the tab was inactive. Please generate a new offer and response to reconnect.')
+        }
+      }
+    }
+
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange)
+  }, [offer, channelOpen, resetConnection])
+
+  useEffect(() => {
+    return () => {
+      if (dcRef.current) dcRef.current.close()
+      if (pcRef.current) pcRef.current.close()
+    }
+  }, [])
+
+  return {
     connectionState,
     offer,
     answer,
@@ -57,443 +475,5 @@ export default function Share() {
     acceptAnswer,
     sendFile,
     disconnect,
-  } = useFileTransfer()
-
-  const [role, setRole] = useState(null)
-  const [peerCode, setPeerCode] = useState('')
-  const [copied, setCopied] = useState(false)
-  const [clipboardError, setClipboardError] = useState(null)
-  const [dragOver, setDragOver] = useState(false)
-  const fileInputRef = useRef(null)
-  const panelRef = useRef(null)
-
-  const displayError = clipboardError || error
-
-  const isConnected =
-    connectionState === 'connected' || connectionState === 'completed'
-
-  useEffect(() => {
-    if (panelRef.current) {
-      gsap.fromTo(
-        panelRef.current,
-        { y: 10, opacity: 0 },
-        { y: 0, opacity: 1, duration: 0.35, ease: 'power2.out' }
-      )
-    }
-  }, [role, offer, answer, isConnected, generating, channelOpen])
-
-  const handleCreateOffer = async () => {
-    setRole('sender')
-    await createOffer()
   }
-
-  const handleJoinShare = () => {
-    setRole('receiver')
-  }
-
-  const handleSubmitOffer = async () => {
-    await createAnswer(peerCode.trim())
-  }
-
-  const handleSubmitAnswer = async () => {
-    await acceptAnswer(peerCode.trim())
-  }
-
-  const pasteFromClipboard = async () => {
-    try {
-      const text = await navigator.clipboard.readText()
-      if (!text.trim()) {
-        setClipboardError('Clipboard is empty. Copy the full connection code first.')
-        return
-      }
-      setPeerCode(text)
-      setClipboardError(null)
-    } catch {
-      setClipboardError('Unable to read clipboard. Please allow clipboard access or paste the code manually.')
-    }
-  }
-
-  const copyToClipboard = (text) => {
-    navigator.clipboard.writeText(text)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
-  }
-
-  const handleDisconnect = () => {
-    disconnect()
-    setRole(null)
-    setPeerCode('')
-  }
-
-  const handleFiles = useCallback((files) => {
-    for (const file of files) {
-      sendFile(file)
-    }
-  }, [sendFile])
-
-  const handleDrop = useCallback((e) => {
-    e.preventDefault()
-    setDragOver(false)
-    if (e.dataTransfer.files.length) {
-      handleFiles(e.dataTransfer.files)
-    }
-  }, [handleFiles])
-
-  const handleDragOver = (e) => {
-    e.preventDefault()
-    setDragOver(true)
-  }
-
-  const handleDragLeave = () => {
-    setDragOver(false)
-  }
-
-  return (
-    <>
-      <Helmet>
-        <title>Share Files - PeerCall</title>
-        <meta
-          name="description"
-          content="Send files directly between browsers. No upload, no server, no size limit. Peer-to-peer file transfer powered by WebRTC."
-        />
-      </Helmet>
-
-      <div className="share-page">
-        <nav className="call-nav">
-          <Link to="/" className="call-back">
-            <ArrowLeft size={18} />
-            <Logo size={26} />
-            <span>PeerCall</span>
-          </Link>
-          <div className="status-pill">
-            <span
-              className={`status-dot ${channelOpen ? 'dot-connected' : generating ? 'dot-connecting' : ''}`}
-            />
-            <span>
-              {channelOpen
-                ? 'Connected'
-                : generating
-                  ? 'Generating...'
-                  : 'Not connected'}
-            </span>
-          </div>
-        </nav>
-
-        <div className="share-body">
-          {displayError && <div className="call-error">{displayError}</div>}
-
-          {/* Connected: file transfer UI */}
-          {channelOpen && (
-            <div className="share-connected" ref={panelRef}>
-              <div className="share-header">
-                <div>
-                  <h2>Connected</h2>
-                  <p>Drop files or click to send. Both sides can send and receive.</p>
-                </div>
-                <button className="btn btn-ghost btn-sm" onClick={handleDisconnect}>
-                  <X size={16} />
-                  Disconnect
-                </button>
-              </div>
-
-              {/* Drop zone */}
-              <div
-                className={`drop-zone ${dragOver ? 'drop-over' : ''}`}
-                onDrop={handleDrop}
-                onDragOver={handleDragOver}
-                onDragLeave={handleDragLeave}
-                onClick={() => fileInputRef.current?.click()}
-              >
-                <Upload size={24} />
-                <p>Drop files here or click to browse</p>
-                <span>Any file type, any size</span>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  multiple
-                  className="sr-only"
-                  onChange={(e) => {
-                    if (e.target.files.length) handleFiles(e.target.files)
-                    e.target.value = ''
-                  }}
-                />
-              </div>
-
-              {/* Transfer progress */}
-              {sending && (
-                <div className="transfer-item">
-                  <Upload size={16} />
-                  <div className="transfer-info">
-                    <span className="transfer-name">{sending.name}</span>
-                    <div className="transfer-bar">
-                      <div
-                        className="transfer-fill"
-                        style={{ width: `${(sending.sent / sending.size) * 100}%` }}
-                      />
-                    </div>
-                    <span className="transfer-meta">
-                      Sending {formatSize(sending.sent)} / {formatSize(sending.size)}
-                    </span>
-                  </div>
-                </div>
-              )}
-
-              {receiving && (
-                <div className="transfer-item">
-                  <Download size={16} />
-                  <div className="transfer-info">
-                    <span className="transfer-name">{receiving.name}</span>
-                    <div className="transfer-bar">
-                      <div
-                        className="transfer-fill"
-                        style={{ width: `${(receiving.received / receiving.size) * 100}%` }}
-                      />
-                    </div>
-                    <span className="transfer-meta">
-                      Receiving {formatSize(receiving.received)} / {formatSize(receiving.size)}
-                    </span>
-                  </div>
-                </div>
-              )}
-
-              {/* Received files */}
-              {receivedFiles.length > 0 && (
-                <div className="received-section">
-                  <h3>Received Files</h3>
-                  <div className="received-list">
-                    {receivedFiles.map((file, i) => {
-                      const Icon = fileIcon(file.type)
-                      return (
-                        <a
-                          key={i}
-                          href={file.url}
-                          download={file.name}
-                          className="received-file"
-                        >
-                          <Icon size={18} />
-                          <div className="received-info">
-                            <span className="received-name">{file.name}</span>
-                            <span className="received-size">{formatSize(file.size)}</span>
-                          </div>
-                          <Download size={16} />
-                        </a>
-                      )
-                    })}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Signaling: generating or code exchange */}
-          {role && !channelOpen && (
-            <div className="share-signaling">
-              {generating && !offer && !answer && (
-                <ConnectionPanelWrapper context="generating">
-                  <div className="panel" ref={panelRef}>
-                    <div className="generating-state">
-                      <Loader2 size={20} className="spin" />
-                      <div>
-                        <h3>Generating connection code...</h3>
-                        <p>This will be much shorter than a call code — no media needed.</p>
-                      </div>
-                    </div>
-                  </div>
-                </ConnectionPanelWrapper>
-              )}
-
-              {role === 'sender' && offer && (
-                <ConnectionPanelWrapper context="sender">
-                  <div className="panel" ref={panelRef}>
-                    <div className="panel-step">
-                      <span className="step-badge">Step 1 of 2</span>
-                      <h3>Send This Code to the Other Person</h3>
-                      <p>
-                        Copy the code below and send it via any messaging app.
-                        They need the <strong>entire code</strong> — do not edit
-                        or shorten it.
-                      </p>
-                    </div>
-                    <div className="code-area">
-                      <textarea
-                        readOnly
-                        value={offer}
-                        rows={3}
-                        onClick={(e) => e.target.select()}
-                      />
-                      <div className="code-actions">
-                        <span className="code-len">{offer.length} chars</span>
-                        <button
-                          className="btn btn-primary"
-                          onClick={() => copyToClipboard(offer)}
-                        >
-                          {copied ? <Check size={16} /> : <Copy size={16} />}
-                          {copied ? 'Copied!' : 'Copy Code'}
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="panel-divider" />
-
-                    <div className="panel-step">
-                      <span className="step-badge">Step 2 of 2</span>
-                      <h3>Paste Their Response Code Here</h3>
-                      <p>
-                        The other person will generate a <strong>different
-                        code</strong> after pasting yours. Ask them to send that
-                        response code back and paste it below.
-                      </p>
-                    </div>
-                    <div className="code-area">
-                      <textarea
-                        placeholder="Paste the response code you received..."
-                        value={peerCode}
-                        onChange={(e) => {
-                          setPeerCode(e.target.value)
-                          setClipboardError(null)
-                        }}
-                        rows={3}
-                      />
-                      <div className="code-actions">
-                        <button
-                          className="btn btn-ghost btn-sm"
-                          onClick={pasteFromClipboard}
-                          type="button"
-                        >
-                          Paste from clipboard
-                        </button>
-                        <button
-                          className="btn btn-primary"
-                          onClick={handleSubmitAnswer}
-                          disabled={!peerCode.trim()}
-                        >
-                          <ArrowRight size={16} />
-                          Connect
-                        </button>
-                      </div>
-                    </div>
-                    <p className="panel-tip">
-                      Make sure you paste the <strong>response</strong> code, not
-                      your own code. The two codes are different.
-                    </p>
-                  </div>
-                </ConnectionPanelWrapper>
-              )}
-
-              {role === 'receiver' && !answer && !generating && (
-                <ConnectionPanelWrapper context="receiver">
-                  <div className="panel" ref={panelRef}>
-                    <div className="panel-step">
-                      <h3>Paste the Code You Received</h3>
-                      <p>
-                        Someone shared a connection code with you. Paste the
-                        <strong> entire code</strong> below — don't edit or
-                        shorten it. After clicking "Generate Response", a new code
-                        will appear that you need to send back to them.
-                      </p>
-                    </div>
-                    <div className="code-area">
-                      <textarea
-                        placeholder="Paste the code you received here..."
-                        value={peerCode}
-                        onChange={(e) => {
-                          setPeerCode(e.target.value)
-                          setClipboardError(null)
-                        }}
-                        rows={3}
-                      />
-                      <div className="code-actions">
-                        <button
-                          className="btn btn-ghost btn-sm"
-                          onClick={pasteFromClipboard}
-                          type="button"
-                        >
-                          Paste from clipboard
-                        </button>
-                        <button
-                          className="btn btn-primary"
-                          onClick={handleSubmitOffer}
-                          disabled={!peerCode.trim()}
-                        >
-                          <Clipboard size={16} />
-                          Generate Response
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                </ConnectionPanelWrapper>
-              )}
-
-              {role === 'receiver' && answer && (
-                <ConnectionPanelWrapper context="receiver">
-                  <div className="panel" ref={panelRef}>
-                    <div className="panel-step">
-                      <h3>Send This Response Code Back</h3>
-                      <p>
-                        Copy this code and send it back to the person who shared
-                        the first code with you. They'll paste it on their end to
-                        complete the connection. Copy the <strong>entire
-                        code</strong>.
-                      </p>
-                    </div>
-                    <div className="code-area">
-                      <textarea
-                        readOnly
-                        value={answer}
-                        rows={3}
-                        onClick={(e) => e.target.select()}
-                      />
-                      <div className="code-actions">
-                        <span className="code-len">{answer.length} chars</span>
-                        <button
-                          className="btn btn-primary"
-                          onClick={() => copyToClipboard(answer)}
-                        >
-                          {copied ? <Check size={16} /> : <Copy size={16} />}
-                          {copied ? 'Copied!' : 'Copy Response'}
-                        </button>
-                      </div>
-                    </div>
-                    <div className="waiting-hint">
-                      <Loader2 size={14} className="spin" />
-                      <span>Waiting for them to enter your code...</span>
-                    </div>
-                  </div>
-                </ConnectionPanelWrapper>
-              )}
-            </div>
-          )}
-
-          {/* Initial: choose role */}
-          {!role && !channelOpen && (
-            <div className="panel-center">
-              <ConnectionPanelWrapper context="general">
-                <div className="panel" ref={panelRef}>
-                  <div className="panel-header">
-                    <h2>Share Files</h2>
-                    <p>
-                      Send files directly between browsers with zero quality loss.
-                      No upload limits, no compression, no server storage. Files
-                      transfer bit-for-bit identical over a dedicated P2P data
-                      channel.
-                    </p>
-                  </div>
-                  <div className="panel-buttons">
-                    <button className="btn btn-primary btn-lg" onClick={handleCreateOffer}>
-                      <Link2 size={18} />
-                      Create Connection
-                    </button>
-                    <button className="btn btn-ghost btn-lg" onClick={handleJoinShare}>
-                      <UserPlus size={18} />
-                      Join Connection
-                    </button>
-                  </div>
-                </div>
-              </ConnectionPanelWrapper>
-            </div>
-          )}
-        </div>
-      </div>
-    </>
-  )
 }
