@@ -1,22 +1,12 @@
 import { useRef, useState, useCallback, useEffect } from 'react'
 
-// Enhanced ICE servers with multiple STUN and optional TURN servers
 const ICE_SERVERS = [
-  // Google STUN servers
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
   { urls: 'stun:stun2.l.google.com:19302' },
   { urls: 'stun:stun3.l.google.com:19302' },
   { urls: 'stun:stun4.l.google.com:19302' },
-  // Clockwork STUN servers
-  { urls: 'stun:stun.keybrutal.com:3478' },
   { urls: 'stun:stun.stunprotocol.org:3478' },
-  // Public TURN relay
-  {
-    urls: ['turn:turnserver.open-relay.com:80', 'turn:openrelay.metered.ca:80'],
-    username: 'openrelayproject',
-    credential: 'openrelayproject',
-  },
 ]
 
 const CHUNK_SIZE = 64 * 1024
@@ -115,9 +105,7 @@ export default function useFileTransfer() {
   const setupDataChannel = useCallback((dc) => {
     dcRef.current = dc
     dc.binaryType = 'arraybuffer'
-    
-    // Configure buffered amount threshold for better performance
-    dc.bufferedAmountLowThreshold = 256 * 1024 // Resume sending when buffer < 256KB
+    dc.bufferedAmountLowThreshold = 256 * 1024
 
     dc.onopen = () => {
       console.log('✓ Data channel opened')
@@ -172,7 +160,7 @@ export default function useFileTransfer() {
   }, [])
 
   const createPeerConnection = useCallback(() => {
-    const pc = new RTCPeerConnection({ 
+    const pc = new RTCPeerConnection({
       iceServers: ICE_SERVERS,
       bundlePolicy: 'max-bundle',
       rtcpMuxPolicy: 'require',
@@ -190,39 +178,20 @@ export default function useFileTransfer() {
       const state = pc.connectionState
       setConnectionState(state)
       console.log(`Connection state: ${state}`)
-      
-      switch(state) {
-        case 'connected':
-          setError(null)
-          break
-        case 'failed':
-          setError('Connection failed. Attempting to reconnect with TURN servers...')
-          setTimeout(() => {
-            if (pcRef.current?.connectionState === 'failed') {
-              pc.restartIce?.()
-            }
-          }, 2000)
-          break
-        case 'disconnected':
-          console.warn('Connection disconnected, may reconnect...')
-          break
+
+      if (state === 'connected') {
+        setError(null)
+      } else if (state === 'failed') {
+        setError('Connection failed. Both peers may be behind strict NAT/firewalls. Try on the same network or use a VPN.')
       }
     }
 
     pc.oniceconnectionstatechange = () => {
       const state = pc.iceConnectionState
       console.log(`ICE connection state: ${state}`)
-      
-      if (state === 'failed') {
-        setError('Network connection failed. Both users may be behind strict firewalls. Using fallback TURN servers...')
-      } else if (state === 'connected' || state === 'completed') {
+      if (state === 'connected' || state === 'completed') {
         setError(null)
       }
-    }
-
-    pc.ondatachannel = (event) => {
-      console.log('Received data channel:', event.channel.label)
-      setupDataChannel(event.channel)
     }
 
     return pc
@@ -233,16 +202,13 @@ export default function useFileTransfer() {
       let resolved = false
       const done = () => { if (!resolved) { resolved = true; resolve() } }
       resolveIceRef.current = done
-      
-      // Longer timeout for better candidate gathering with TURN servers
-      setTimeout(done, 12000)
-      
-      // Early exit if gathering is complete
-      setTimeout(() => {
-        if (!resolved && pcRef.current?.iceGatheringState === 'complete') {
-          done()
-        }
-      }, 3000)
+
+      if (pcRef.current?.iceGatheringState === 'complete') {
+        done()
+        return
+      }
+
+      setTimeout(done, 8000)
     })
 
   const createOffer = useCallback(async () => {
@@ -250,24 +216,18 @@ export default function useFileTransfer() {
       setError(null)
       setGenerating(true)
       setConnectionState('connecting')
-      
+
       const pc = createPeerConnection()
-      const dc = pc.createDataChannel('files', { 
-        ordered: true,
-        maxPacketLifeTime: 0, // Reliable delivery for files
-      })
+      const dc = pc.createDataChannel('files', { ordered: true })
       setupDataChannel(dc)
 
-      const offerDesc = await pc.createOffer({
-        iceRestart: false,
-      })
-      
+      const offerDesc = await pc.createOffer()
       await pc.setLocalDescription(offerDesc)
       await waitForIce()
 
       const desc = pc.localDescription
       const code = await encode({ type: desc.type, sdp: desc.sdp })
-      
+
       setOffer(code)
       setGenerating(false)
       console.log('✓ File transfer offer created')
@@ -286,17 +246,16 @@ export default function useFileTransfer() {
       setError(null)
       setGenerating(true)
       setConnectionState('connecting')
-      
+
       const pc = createPeerConnection()
       pc.ondatachannel = (e) => {
+        console.log('Received data channel:', e.channel.label)
         setupDataChannel(e.channel)
       }
 
       const offerDesc = await decode(offerCode)
-      if (offerDesc.type !== 'offer') {
-        throw new Error('UNEXPECTED_ANSWER_CODE')
-      }
-      
+      if (offerDesc.type !== 'offer') throw new Error('UNEXPECTED_ANSWER_CODE')
+
       await pc.setRemoteDescription(new RTCSessionDescription(offerDesc))
 
       const answerDesc = await pc.createAnswer()
@@ -305,7 +264,7 @@ export default function useFileTransfer() {
 
       const desc = pc.localDescription
       const code = await encode({ type: desc.type, sdp: desc.sdp })
-      
+
       setAnswer(code)
       setGenerating(false)
       console.log('✓ File transfer answer created')
@@ -314,7 +273,7 @@ export default function useFileTransfer() {
       console.error('File transfer answer creation failed:', err)
       setConnectionState('idle')
       setGenerating(false)
-      
+
       if (err.message === 'UNEXPECTED_ANSWER_CODE') {
         setError('It looks like you pasted the response code instead of the original connection code. Paste the first code shared by the other laptop.')
       } else {
@@ -325,14 +284,8 @@ export default function useFileTransfer() {
   }, [createPeerConnection, setupDataChannel])
 
   const resetConnection = useCallback((preserveError = false) => {
-    if (dcRef.current) {
-      dcRef.current.close()
-      dcRef.current = null
-    }
-    if (pcRef.current) {
-      pcRef.current.close()
-      pcRef.current = null
-    }
+    if (dcRef.current) { dcRef.current.close(); dcRef.current = null }
+    if (pcRef.current) { pcRef.current.close(); pcRef.current = null }
     setConnectionState('idle')
     setOffer('')
     setAnswer('')
@@ -345,38 +298,23 @@ export default function useFileTransfer() {
 
   const isConnectionHealthy = useCallback(() => {
     const pc = pcRef.current
-    // Check if connection is actually closed/failed, not just in different signaling state
-    if (!pc || pc.connectionState === 'closed' || pc.connectionState === 'failed') {
-      return false
-    }
-    // For file transfer, we need at least a local description set
+    if (!pc || pc.connectionState === 'closed' || pc.connectionState === 'failed') return false
     if (!pc.localDescription) return false
     return true
   }, [])
 
-  const disconnect = useCallback(() => {
-    resetConnection(false)
-  }, [resetConnection])
+  const disconnect = useCallback(() => resetConnection(false), [resetConnection])
 
   const acceptAnswer = useCallback(async (answerCode) => {
     try {
       setError(null)
-      if (!pcRef.current) {
-        throw new Error('NO_PEER_CONNECTION')
-      }
+      if (!pcRef.current) throw new Error('NO_PEER_CONNECTION')
 
       const answerDesc = await decode(answerCode)
-      if (answerDesc.type !== 'answer') {
-        throw new Error('UNEXPECTED_OFFER_CODE')
-      }
+      if (answerDesc.type !== 'answer') throw new Error('UNEXPECTED_OFFER_CODE')
+      if (!isConnectionHealthy()) throw new Error('WRONG_CONNECTION_STATE')
 
-      // Validate connection health before attempting to set remote description
-      if (!isConnectionHealthy()) {
-        throw new Error('WRONG_CONNECTION_STATE')
-      }
-
-      const pc = pcRef.current
-      await pc.setRemoteDescription(new RTCSessionDescription(answerDesc))
+      await pcRef.current.setRemoteDescription(new RTCSessionDescription(answerDesc))
     } catch (err) {
       console.error('Error accepting answer:', err)
       if (err.message === 'UNEXPECTED_OFFER_CODE') {
@@ -396,9 +334,7 @@ export default function useFileTransfer() {
   const sendFile = useCallback(async (file) => {
     const dc = dcRef.current
     if (!dc || dc.readyState !== 'open') {
-      const errorMsg = 'Not connected. Establish connection first.'
-      setError(errorMsg)
-      console.error(errorMsg)
+      setError('Not connected. Establish connection first.')
       return
     }
 
@@ -421,26 +357,20 @@ export default function useFileTransfer() {
       const sendChunk = () => {
         while (offset < buffer.byteLength) {
           if (dc.bufferedAmount > CHUNK_SIZE * 8) {
-            console.log(`Buffer full (${dc.bufferedAmount} bytes), waiting...`)
-            dc.onbufferedamountlow = () => {
-              dc.onbufferedamountlow = null
-              sendChunk()
-            }
+            dc.onbufferedamountlow = () => { dc.onbufferedamountlow = null; sendChunk() }
             dc.bufferedAmountLowThreshold = CHUNK_SIZE * 2
             return
           }
-          
+
           const chunk = buffer.slice(offset, offset + CHUNK_SIZE)
-          
           try {
             dc.send(chunk)
             offset += chunk.byteLength
-            retries = 0 // Reset retry counter on success
+            retries = 0
             setSending({ name: file.name, size: file.size, sent: offset })
           } catch (err) {
             if (retries < maxRetries && err.message.includes('buffered')) {
               retries++
-              console.warn(`Send error (retry ${retries}/${maxRetries}):`, err.message)
               setTimeout(sendChunk, 100 * retries)
               return
             }
@@ -462,14 +392,10 @@ export default function useFileTransfer() {
   }, [])
 
   useEffect(() => {
-    // Monitor tab visibility to detect when page comes back into focus
     const handleVisibilityChange = () => {
       if (document.hidden) return
-
-      // Page came back into focus - validate or reset connection
       const pc = pcRef.current
       if (pc && offer && !channelOpen) {
-        // We have an offer waiting for an answer, but if connection looks stale, reset it
         if (pc.signalingState !== 'have-local-offer' || !pc.localDescription) {
           console.warn('Connection became stale while tab was inactive')
           resetConnection(true)
