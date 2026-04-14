@@ -139,6 +139,7 @@ export default function useWebRTC() {
   const pcRef = useRef(null)
   const localStreamRef = useRef(null)
   const remoteStreamRef = useRef(new MediaStream())
+  const remoteDescriptionSetRef = useRef(false) // Track if remote description has been set
 
   const [localStream, setLocalStream] = useState(null)
   const [remoteStream] = useState(remoteStreamRef.current)
@@ -219,17 +220,21 @@ export default function useWebRTC() {
       const state = pc.iceConnectionState
       console.log(`ICE state: ${state}`)
       
-      switch(state) {
-        case 'failed':
-          setError('ICE connection failed. Both users may be behind strict firewalls. Using fallback TURN servers...')
-          break
-        case 'connected':
-        case 'completed':
-          setError(null)
-          break
-        case 'disconnected':
-          console.warn('ICE disconnected - may reconnect automatically')
-          break
+      // Only report connection failures if remote description has been set
+      // (meaning both peers are actually attempting to connect)
+      if (remoteDescriptionSetRef.current) {
+        switch(state) {
+          case 'failed':
+            setError('Connection failed. Both peers may be behind strict NAT/firewalls. Try on the same network or use a VPN.')
+            break
+          case 'connected':
+          case 'completed':
+            setError(null)
+            break
+          case 'disconnected':
+            console.warn('ICE disconnected - may reconnect automatically')
+            break
+        }
       }
     }
 
@@ -375,6 +380,7 @@ export default function useWebRTC() {
       
       const offerDesc = await decode(offerCode)
       await pc.setRemoteDescription(new RTCSessionDescription(offerDesc))
+      remoteDescriptionSetRef.current = true // Mark that we've set remote description
       
       const answerDesc = await pc.createAnswer({
         voiceActivityDetection: true,
@@ -412,6 +418,7 @@ export default function useWebRTC() {
       setError(null)
       const answerDesc = await decode(answerCode)
       await pcRef.current.setRemoteDescription(new RTCSessionDescription(answerDesc))
+      remoteDescriptionSetRef.current = true // Mark that we've set remote description
       console.log('✓ Answer accepted, connection should establish shortly...')
     } catch (err) {
       console.error('Answer acceptance failed:', err)
@@ -456,6 +463,7 @@ export default function useWebRTC() {
       pcRef.current = null
     }
     remoteStreamRef.current = new MediaStream()
+    remoteDescriptionSetRef.current = false // Reset for next call
     setConnectionState('idle')
     setOffer('')
     setAnswer('')
@@ -473,6 +481,7 @@ export default function useWebRTC() {
       if (pcRef.current) {
         pcRef.current.close()
       }
+      remoteDescriptionSetRef.current = false
     }
   }, [])
 
