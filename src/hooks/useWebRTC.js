@@ -1,19 +1,21 @@
 import { useRef, useState, useCallback, useEffect } from 'react'
 
-// Enhanced ICE servers with multiple STUN and optional TURN servers for better NAT traversal
 const ICE_SERVERS = [
-  // Google STUN servers
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
   { urls: 'stun:stun2.l.google.com:19302' },
   { urls: 'stun:stun3.l.google.com:19302' },
   { urls: 'stun:stun4.l.google.com:19302' },
-  // Clockwork STUN servers (alternative option)
-  { urls: 'stun:stun.keybrutal.com:3478' },
   { urls: 'stun:stun.stunprotocol.org:3478' },
-  // Public TURN server (US-based)
+  // TURN relay — essential for strict firewalls. Includes TCP and TLS variants so
+  // at least one transport succeeds even when UDP is blocked on both sides.
   {
-    urls: ['turn:turnserver.open-relay.com:80', 'turn:openrelay.metered.ca:80'],
+    urls: [
+      'turn:openrelay.metered.ca:80',
+      'turn:openrelay.metered.ca:80?transport=tcp',
+      'turn:openrelay.metered.ca:443',
+      'turns:openrelay.metered.ca:443',
+    ],
     username: 'openrelayproject',
     credential: 'openrelayproject',
   },
@@ -63,7 +65,8 @@ function minifySdp(sdp) {
     if (section && keepPTs) {
       const ptLine = line.match(/^a=(?:rtpmap|fmtp|rtcp-fb):(\d+)[ /]/)
       if (ptLine && !keepPTs.has(ptLine[1])) continue
-      if (line.startsWith('a=candidate:') && line.includes(' tcp ')) continue
+      // Do NOT filter TCP candidates — they are the only viable path through
+      // firewalls that block UDP (e.g. TCP relay candidates from TURN over TCP/TLS).
     }
     out.push(line)
   }
@@ -201,13 +204,10 @@ export default function useWebRTC() {
           break
         case 'failed':
           console.error('✗ Peer connection failed')
-          setError('Connection failed. Trying to reconnect...')
-          // Attempt ICE restart
-          setTimeout(() => {
-            if (pcRef.current?.connectionState === 'failed') {
-              pc.restartIce?.()
-            }
-          }, 2000)
+          // ICE restart is useless in copy-paste signalling — there is no channel
+          // to deliver the new candidates to the remote peer. Tell the user to
+          // start a fresh offer/answer instead.
+          setError('Connection failed. Both peers need to start over — hang up and generate a new connection code.')
           break
         case 'closed':
           console.log('Connection closed')
@@ -225,7 +225,7 @@ export default function useWebRTC() {
       if (remoteDescriptionSetRef.current) {
         switch(state) {
           case 'failed':
-            setError('Connection failed. Both peers may be behind strict NAT/firewalls. Try on the same network or use a VPN.')
+            setError('Connection failed. Hang up and generate a new connection code to try again.')
             break
           case 'connected':
           case 'completed':
@@ -304,17 +304,14 @@ export default function useWebRTC() {
       let resolved = false
       const done = () => { if (!resolved) { resolved = true; resolve() } }
       resolveIceRef.current = done
-      
-      // Wait longer for better candidate gathering, especially for TURN servers
-      // First 3s for fast candidates (host/srflx), then 7s more for TURN relay
+
+      // Guard against the race where gathering already finished before this
+      // promise registered its callback (can happen on LAN with instant host candidates).
+      if (pcRef.current?.iceGatheringState === 'complete') { done(); return }
+
+      // 12s covers slow TURN relay candidates; the onicecandidate(null) handler
+      // fires done() early whenever the browser finishes ahead of time.
       setTimeout(done, 12000)
-      
-      // Early exit if we have enough candidates (after 3s)
-      setTimeout(() => {
-        if (!resolved && pcRef.current?.iceGatheringState === 'complete') {
-          done()
-        }
-      }, 3000)
     })
 
   const createOffer = useCallback(async (video = true) => {

@@ -7,6 +7,18 @@ const ICE_SERVERS = [
   { urls: 'stun:stun3.l.google.com:19302' },
   { urls: 'stun:stun4.l.google.com:19302' },
   { urls: 'stun:stun.stunprotocol.org:3478' },
+  // TURN relay — without this, file transfer has zero fallback through firewalls.
+  // TCP and TLS variants ensure connectivity even when UDP is blocked.
+  {
+    urls: [
+      'turn:openrelay.metered.ca:80',
+      'turn:openrelay.metered.ca:80?transport=tcp',
+      'turn:openrelay.metered.ca:443',
+      'turns:openrelay.metered.ca:443',
+    ],
+    username: 'openrelayproject',
+    credential: 'openrelayproject',
+  },
 ]
 
 const CHUNK_SIZE = 64 * 1024
@@ -164,6 +176,7 @@ export default function useFileTransfer() {
       iceServers: ICE_SERVERS,
       bundlePolicy: 'max-bundle',
       rtcpMuxPolicy: 'require',
+      iceCandidatePoolSize: 10,
     })
     pcRef.current = pc
 
@@ -182,7 +195,7 @@ export default function useFileTransfer() {
       if (state === 'connected') {
         setError(null)
       } else if (state === 'failed') {
-        setError('Connection failed. Both peers may be behind strict NAT/firewalls. Try on the same network or use a VPN.')
+        setError('Connection failed. Both sides need to start over — generate a new connection code.')
       }
     }
 
@@ -203,12 +216,13 @@ export default function useFileTransfer() {
       const done = () => { if (!resolved) { resolved = true; resolve() } }
       resolveIceRef.current = done
 
-      if (pcRef.current?.iceGatheringState === 'complete') {
-        done()
-        return
-      }
+      // Guard against the race where gathering already finished before this
+      // promise registered its callback.
+      if (pcRef.current?.iceGatheringState === 'complete') { done(); return }
 
-      setTimeout(done, 8000)
+      // 12s matches the call hook — TURN relay candidates need time to arrive,
+      // especially over TCP/TLS. The onicecandidate(null) handler fires done() early.
+      setTimeout(done, 12000)
     })
 
   const createOffer = useCallback(async () => {
